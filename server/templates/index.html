@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>EDR — Защита ПД учеников</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <style>
+    body { background: #f0f2f5; }
+    .navbar-brand span { font-weight: 700; letter-spacing: .5px; }
+    .stat-card { border-left: 4px solid; }
+    .stat-card.high   { border-color: #dc3545; }
+    .stat-card.medium { border-color: #ffc107; }
+    .stat-card.agents { border-color: #0d6efd; }
+    .stat-card.pii    { border-color: #198754; }
+    .stat-value { font-size: 2rem; font-weight: 700; }
+    .badge-HIGH   { background:#f8d7da; color:#842029; border:1px solid #f5c2c7; }
+    .badge-MEDIUM { background:#fff3cd; color:#664d03; border:1px solid #ffecb5; }
+    .badge-LOW    { background:#d1e7dd; color:#0a3622; border:1px solid #badbcc; }
+    .badge-sev { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
+    .ws-dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:5px; }
+    .ws-on  { background:#198754; }
+    .ws-off { background:#dc3545; }
+    .agent-card .online-badge  { background:#d1e7dd; color:#0a3622; }
+    .agent-card .offline-badge { background:#f8d7da; color:#842029; }
+    #loginScreen { min-height:100vh; display:flex; align-items:center; justify-content:center; }
+    #app { display:none; }
+    .table th { color:#6c757d; font-size:.78rem; text-transform:uppercase; }
+    .table td { font-size:.88rem; vertical-align:middle; }
+    .alert-row-HIGH { background:#fff5f5; }
+    .clickable-row { cursor:pointer; }
+    .clickable-row:hover { background:#f8f9fa !important; }
+    .detail-label { font-weight:600; color:#6c757d; font-size:.78rem; text-transform:uppercase; min-width:120px; }
+    .detail-value { font-size:.9rem; word-break:break-all; }
+    .detail-row { display:flex; gap:12px; padding:6px 0; border-bottom:1px solid #f0f0f0; }
+    .detail-row:last-child { border-bottom:none; }
+    .modal-header-HIGH   { background:#fff5f5; border-bottom:2px solid #dc3545; }
+    .modal-header-MEDIUM { background:#fffdf0; border-bottom:2px solid #ffc107; }
+    .modal-header-LOW    { background:#f0fff4; border-bottom:2px solid #198754; }
+    .usb-block-badge { background:#dc3545; color:#fff; padding:3px 10px; border-radius:20px; font-size:.78rem; }
+    .usb-allow-badge { background:#198754; color:#fff; padding:3px 10px; border-radius:20px; font-size:.78rem; }
+    .chart-card { background:#fff; border-radius:8px; padding:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+    .prot-badge { background:#6610f2; color:#fff; padding:3px 10px; border-radius:20px; font-size:.75rem; }
+    .nav-tabs .nav-link { font-size:.88rem; }
+  </style>
+</head>
+<body>
+
+<!-- ── Login ──────────────────────────────────────────────────────────────────── -->
+<div id="loginScreen">
+  <div class="card shadow" style="width:360px">
+    <div class="card-body p-4">
+      <h5 class="mb-1 fw-bold"><i class="bi bi-shield-lock-fill text-primary me-2"></i>EDR School</h5>
+      <p class="text-muted small mb-3">Система защиты ПД учеников</p>
+      <div id="loginError" class="alert alert-danger d-none py-2"></div>
+      <div class="mb-3">
+        <label class="form-label small">Логин</label>
+        <input id="loginUser" type="text" class="form-control" value="admin"/>
+      </div>
+      <div class="mb-3">
+        <label class="form-label small">Пароль</label>
+        <input id="loginPass" type="password" class="form-control" value="admin123"
+               onkeydown="if(event.key==='Enter') doLogin()"/>
+      </div>
+      <button class="btn btn-primary w-100" onclick="doLogin()">Войти</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── App ───────────────────────────────────────────────────────────────────── -->
+<div id="app">
+  <nav class="navbar navbar-dark bg-dark px-3 py-2">
+    <span class="navbar-brand">
+      <i class="bi bi-shield-shaded text-warning me-2"></i>
+      <span>EDR — Защита ПД учеников</span>
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      <span id="wsStatus" class="text-white-50 small">
+        <span class="ws-dot ws-off" id="wsDot"></span>WebSocket
+      </span>
+      <span class="text-white-50 small" id="currentUser"></span>
+      <button class="btn btn-sm btn-outline-light" onclick="doLogout()">
+        <i class="bi bi-box-arrow-right"></i>
+      </button>
+    </div>
+  </nav>
+
+  <div class="container-fluid py-4 px-4">
+
+    <!-- Stats -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card stat-card high h-100">
+          <div class="card-body">
+            <div class="stat-value text-danger" id="statHigh">—</div>
+            <div class="text-muted small">HIGH-алерты</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card stat-card medium h-100">
+          <div class="card-body">
+            <div class="stat-value text-warning" id="statEvents">—</div>
+            <div class="text-muted small">Всего событий</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card stat-card agents h-100">
+          <div class="card-body">
+            <div class="stat-value text-primary" id="statAgents">—</div>
+            <div class="text-muted small">Агентов онлайн</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card stat-card pii h-100">
+          <div class="card-body">
+            <div class="stat-value text-success" id="statPii">—</div>
+            <div class="text-muted small">В карантине</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-3" id="mainTabs">
+      <li class="nav-item">
+        <a class="nav-link active" data-bs-toggle="tab" href="#tabAlerts">
+          <i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>Алерты
+          <span class="badge bg-danger ms-1" id="tabBadge">0</span>
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabEvents">
+          <i class="bi bi-list-ul me-1"></i>События
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabAgents">
+          <i class="bi bi-pc-display-horizontal me-1"></i>Агенты
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabStatistics" onclick="loadStatistics()">
+          <i class="bi bi-bar-chart-fill me-1"></i>Статистика
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabQuarantine" onclick="loadQuarantine()">
+          <i class="bi bi-folder-x-fill me-1 text-warning"></i>Карантин
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabSettings" onclick="loadEmailSettings()">
+          <i class="bi bi-gear-fill me-1"></i>Настройки
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabPrivileges">
+          <i class="bi bi-person-check me-1"></i>Привилегии
+        </a>
+      </li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- ── Tab: Alerts ──────────────────────────────────────────────────── -->
+      <div class="tab-pane fade show active" id="tabAlerts">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Активные алерты <span class="text-muted small">(нажмите на строку для деталей)</span></span>
+            <div class="d-flex gap-2">
+              <select id="alertSevFilter" class="form-select form-select-sm" style="width:130px" onchange="loadAlerts()">
+                <option value="">Все severity</option>
+                <option value="HIGH">HIGH</option>
+                <option value="MEDIUM">MEDIUM</option>
+                <option value="LOW">LOW</option>
+              </select>
+              <button class="btn btn-sm btn-outline-secondary" onclick="loadAlerts()">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr><th>Время</th><th>Агент</th><th>Тип</th><th>Severity</th><th>Описание</th><th></th></tr>
+              </thead>
+              <tbody id="alertsBody">
+                <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Events ──────────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabEvents">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">События <span class="text-muted small">(нажмите на строку для деталей)</span></span>
+            <div class="d-flex gap-2">
+              <div class="btn-group btn-group-sm" role="group">
+                <button class="btn btn-outline-secondary active" onclick="filterEvents('')"   id="evAll">Все</button>
+                <button class="btn btn-outline-danger"           onclick="filterEvents('HIGH')"   id="evHigh">HIGH</button>
+                <button class="btn btn-outline-warning"          onclick="filterEvents('MEDIUM')" id="evMed">MEDIUM</button>
+                <button class="btn btn-outline-success"          onclick="filterEvents('LOW')"    id="evLow">LOW</button>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary" onclick="loadEvents()">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr><th>Время</th><th>Агент</th><th>Пользователь</th><th>Тип события</th><th>Severity</th><th>Детали</th></tr>
+              </thead>
+              <tbody id="eventsBody">
+                <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Agents ──────────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabAgents">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span class="fw-semibold">Зарегистрированные агенты</span>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadAgents()">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <div class="row g-3" id="agentsGrid">
+          <div class="col-12 text-muted">Загрузка...</div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Statistics ─────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabStatistics">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span class="fw-semibold">Статистика событий (обновляется каждые 30 сек)</span>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadStatistics()">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <div class="row g-3 mb-3" id="statSummaryRow">
+          <div class="col-6 col-md-3">
+            <div class="chart-card text-center">
+              <div class="fs-1 fw-bold text-danger" id="statTotalHigh">—</div>
+              <div class="text-muted small">HIGH событий</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="chart-card text-center">
+              <div class="fs-1 fw-bold text-warning" id="statTotalMed">—</div>
+              <div class="text-muted small">MEDIUM событий</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="chart-card text-center">
+              <div class="fs-1 fw-bold text-success" id="statTotalLow">—</div>
+              <div class="text-muted small">LOW событий</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="chart-card text-center">
+              <div class="fs-1 fw-bold" id="statProtCount" style="color:#fd7e14">—</div>
+              <div class="text-muted small">В карантине</div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-8">
+            <div class="chart-card">
+              <div class="fw-semibold mb-2">Активность за 7 дней</div>
+              <canvas id="chartLine" height="80"></canvas>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="chart-card">
+              <div class="fw-semibold mb-2">Severity breakdown</div>
+              <canvas id="chartPie" height="180"></canvas>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="chart-card">
+              <div class="fw-semibold mb-2">Топ типов событий</div>
+              <canvas id="chartBar" height="120"></canvas>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="chart-card">
+              <div class="fw-semibold mb-2">Топ-5 агентов</div>
+              <canvas id="chartAgents" height="120"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Quarantine ───────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabQuarantine">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+              <i class="bi bi-folder-x-fill text-warning me-1"></i>
+              Файлы в карантине
+            </span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadQuarantine()">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr>
+                  <th>Файл</th><th>Оригинальный путь</th><th>Типы ПД</th>
+                  <th>Агент</th><th>Дата</th><th>Статус</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="quarantineBody">
+                <tr><td colspan="7" class="text-center text-muted py-3">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Settings ──────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabSettings">
+        <div class="row g-3">
+          <!-- Email settings -->
+          <div class="col-md-6">
+            <div class="card shadow-sm">
+              <div class="card-header fw-semibold">
+                <i class="bi bi-envelope-fill me-1"></i>Email-уведомления (HIGH-алерты)
+              </div>
+              <div class="card-body">
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" id="emailEnabled"/>
+                  <label class="form-check-label" for="emailEnabled">Включить email-уведомления</label>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">SMTP хост</label>
+                  <input id="smtpHost" type="text" class="form-control form-control-sm" placeholder="smtp.gmail.com"/>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">SMTP порт</label>
+                  <input id="smtpPort" type="number" class="form-control form-control-sm" value="587"/>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">Логин (от@gmail.com)</label>
+                  <input id="smtpUser" type="text" class="form-control form-control-sm"/>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">Пароль приложения</label>
+                  <input id="smtpPass" type="password" class="form-control form-control-sm" placeholder="Оставьте пустым чтобы не менять"/>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small">Email директора (получатель)</label>
+                  <input id="directorEmail" type="email" class="form-control form-control-sm" placeholder="director@school.kz"/>
+                </div>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-primary btn-sm" onclick="saveEmailSettings()">
+                    <i class="bi bi-save me-1"></i>Сохранить
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="testEmail()">
+                    <i class="bi bi-send me-1"></i>Тест
+                  </button>
+                </div>
+                <div id="emailMsg" class="mt-2 small"></div>
+              </div>
+            </div>
+          </div>
+          <!-- Reports -->
+          <div class="col-md-6">
+            <div class="card shadow-sm">
+              <div class="card-header fw-semibold">
+                <i class="bi bi-file-earmark-pdf-fill me-1 text-danger"></i>PDF-отчёты
+              </div>
+              <div class="card-body">
+                <p class="text-muted small">Генерация PDF-отчётов с таблицей событий, статистикой severity и топом нарушений.</p>
+                <div class="d-grid gap-2">
+                  <a href="/reports/weekly" class="btn btn-outline-danger" target="_blank">
+                    <i class="bi bi-file-earmark-pdf me-1"></i>
+                    Еженедельный отчёт (последние 7 дней)
+                  </a>
+                  <a href="/reports/monthly" class="btn btn-outline-danger" target="_blank">
+                    <i class="bi bi-file-earmark-pdf me-1"></i>
+                    Ежемесячный отчёт (последние 30 дней)
+                  </a>
+                </div>
+                <hr/>
+                <p class="text-muted small mb-2">Чтобы скачать отчёты, нужно быть авторизованным.</p>
+                <button class="btn btn-sm btn-outline-secondary" onclick="downloadReport('weekly')">
+                  <i class="bi bi-download me-1"></i>Скачать недельный
+                </button>
+                <button class="btn btn-sm btn-outline-secondary ms-2" onclick="downloadReport('monthly')">
+                  <i class="bi bi-download me-1"></i>Скачать месячный
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: Privileges ──────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabPrivileges">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="card shadow-sm">
+              <div class="card-header fw-semibold">Выдать привилегию</div>
+              <div class="card-body">
+                <div class="mb-2">
+                  <label class="form-label small">Пользователь</label>
+                  <input id="privUser" type="text" class="form-control form-control-sm" placeholder="username"/>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">Агент (пустое = все)</label>
+                  <input id="privAgent" type="text" class="form-control form-control-sm" placeholder="PC-01"/>
+                </div>
+                <div class="form-check mb-1">
+                  <input class="form-check-input" type="checkbox" id="privUnlock"/>
+                  <label class="form-check-label small" for="privUnlock">Разблокировка файлов</label>
+                </div>
+                <div class="form-check mb-3">
+                  <input class="form-check-input" type="checkbox" id="privViewPii"/>
+                  <label class="form-check-label small" for="privViewPii">Просмотр ПД-файлов</label>
+                </div>
+                <button class="btn btn-primary btn-sm w-100" onclick="grantPrivilege()">Выдать</button>
+                <div id="privMsg" class="mt-2 small"></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-8">
+            <div class="card shadow-sm">
+              <div class="card-header d-flex justify-content-between">
+                <span class="fw-semibold">Текущие привилегии</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadPrivileges()">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                  <thead>
+                    <tr><th>Пользователь</th><th>Агент</th><th>Разблокировка</th><th>Просмотр ПД</th><th>Выдал</th><th>Дата</th></tr>
+                  </thead>
+                  <tbody id="privBody">
+                    <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-content -->
+  </div><!-- /container -->
+</div><!-- /app -->
+
+<!-- ── Детальное модальное окно ───────────────────────────────────────────────── -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header" id="detailModalHeader">
+        <h5 class="modal-title" id="detailModalLabel">Детали</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailModalBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+        <div id="detailModalActions"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const API = '';
+let TOKEN = localStorage.getItem('edr_token');
+let currentSevFilter = '';
+let allEvents  = [];
+let allAlerts  = [];
+let ws = null;
+let detailModal = null;
+let _charts = {};
+let _statsTimer = null;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById('loginUser').value;
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginError');
+  try {
+    const fd = new FormData();
+    fd.append('username', u); fd.append('password', p);
+    const r = await fetch('/auth/login', {method:'POST', body: fd});
+    if (!r.ok) { err.textContent='Неверный логин или пароль'; err.classList.remove('d-none'); return; }
+    const data = await r.json();
+    TOKEN = data.access_token;
+    localStorage.setItem('edr_token', TOKEN);
+    err.classList.add('d-none');
+    showApp(u);
+  } catch(e) {
+    err.textContent='Ошибка соединения с сервером'; err.classList.remove('d-none');
+  }
+}
+
+function doLogout() {
+  localStorage.removeItem('edr_token');
+  TOKEN = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  if (ws) { ws.close(); ws = null; }
+  if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+}
+
+async function showApp(username) {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('currentUser').textContent = username || '';
+  detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+  await Promise.all([loadAlerts(), loadEvents(), loadAgents(), loadPrivileges(), loadPiiCount()]);
+  connectWS();
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function apiFetch(path, opts = {}) {
+  const headers = {'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`, ...(opts.headers||{})};
+  const r = await fetch(API + path, {...opts, headers});
+  if (r.status === 401) { doLogout(); return null; }
+  return r.ok ? r.json() : null;
+}
+
+// ── Data loaders ──────────────────────────────────────────────────────────────
+async function loadAlerts() {
+  const sev = document.getElementById('alertSevFilter').value;
+  const url = '/alerts?resolved=false&limit=10000' + (sev ? `&severity=${sev}` : '');
+  const data = await apiFetch(url);
+  if (!data) return;
+  allAlerts = data;
+  updateAlertCounters();
+  renderAlerts(allAlerts);
+}
+
+function updateAlertCounters() {
+  const active = allAlerts.filter(a => !a.is_resolved);
+  document.getElementById('statHigh').textContent = active.filter(a => a.severity==='HIGH').length;
+  document.getElementById('tabBadge').textContent  = active.length;
+}
+
+async function loadEvents() {
+  const data = await apiFetch('/events?limit=10000');
+  if (!data) return;
+  allEvents = data;
+  document.getElementById('statEvents').textContent = allEvents.length;
+  renderEvents(allEvents.filter(e => !currentSevFilter || e.severity === currentSevFilter));
+}
+
+async function loadAgents() {
+  const data = await apiFetch('/agents');
+  if (!data) return;
+  const online = data.filter(a => a.is_online).length;
+  document.getElementById('statAgents').textContent = online;
+  renderAgents(data);
+}
+
+async function loadPrivileges() {
+  const data = await apiFetch('/privileges');
+  if (!data) return;
+  renderPrivileges(data);
+}
+
+async function loadPiiCount() {
+  const data = await apiFetch('/quarantine/count');
+  if (data) document.getElementById('statPii').textContent = data.count;
+}
+
+async function loadQuarantine() {
+  const data = await apiFetch('/quarantine');
+  const tbody = document.getElementById('quarantineBody');
+  if (!data) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Ошибка загрузки</td></tr>'; return; }
+  if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Карантин пуст</td></tr>'; return; }
+  const colors = {IIN:'danger', PHONE:'primary', EMAIL:'info', FIO:'success', DOB:'warning'};
+  tbody.innerHTML = data.map(f => {
+    const types = (f.pii_types || '').split(',').filter(Boolean);
+    const typesBadges = types.map(t => `<span class="badge bg-${colors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+    const status = f.is_restored
+      ? '<span class="badge bg-success">Восстановлен</span>'
+      : '<span class="badge bg-warning text-dark"><i class="bi bi-lock-fill me-1"></i>В карантине</span>';
+    const actions = !f.is_restored ? `
+      <button class="btn btn-sm btn-outline-success py-0 me-1" onclick="restoreFile(${f.id}, '${escHtml(f.file_name||'')}')">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Восстановить
+      </button>
+      <button class="btn btn-sm btn-outline-danger py-0" onclick="deleteForever(${f.id}, '${escHtml(f.file_name||'')}')">
+        <i class="bi bi-trash3 me-1"></i>Удалить
+      </button>` : '';
+    return `<tr>
+      <td><i class="bi bi-file-earmark-x text-warning me-1"></i>
+          <span title="${escHtml(f.quarantine_path)}">${escHtml(f.file_name||'—')}</span></td>
+      <td class="text-truncate" style="max-width:220px" title="${escHtml(f.original_path)}">
+        <code class="small">${escHtml(f.original_path||'—')}</code></td>
+      <td>${typesBadges || '—'}</td>
+      <td><code>${escHtml(f.agent_id||'—')}</code></td>
+      <td>${fmtTime(f.timestamp)}</td>
+      <td>${status}</td>
+      <td style="white-space:nowrap">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function restoreFile(id, fname) {
+  const pw = prompt(`Введите пароль администратора для восстановления файла:\n${fname}`);
+  if (pw === null) return;
+  const r = await fetch(`/quarantine/${id}/restore`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
+    body: JSON.stringify({admin_password: pw}),
+  });
+  if (r.ok) {
+    await loadQuarantine(); await loadPiiCount();
+  } else {
+    const err = await r.json().catch(()=>({}));
+    alert('Ошибка: ' + (err.detail || 'не удалось восстановить'));
+  }
+}
+
+async function deleteForever(id, fname) {
+  if (!confirm(`Безвозвратно удалить файл из карантина?\n${fname}\n\nФайл будет удалён НАВСЕГДА.`)) return;
+  const pw = prompt('Введите пароль администратора:');
+  if (pw === null) return;
+  const r = await fetch(`/quarantine/${id}`, {
+    method: 'DELETE',
+    headers: {'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
+    body: JSON.stringify({admin_password: pw}),
+  });
+  if (r.ok) {
+    await loadQuarantine(); await loadPiiCount();
+  } else {
+    const err = await r.json().catch(()=>({}));
+    alert('Ошибка: ' + (err.detail || 'не удалось удалить'));
+  }
+}
+
+// ── Statistics ────────────────────────────────────────────────────────────────
+async function loadStatistics() {
+  const data = await apiFetch('/statistics');
+  if (!data) return;
+
+  document.getElementById('statTotalHigh').textContent = data.high || 0;
+  document.getElementById('statTotalMed').textContent  = data.medium || 0;
+  document.getElementById('statTotalLow').textContent  = data.low || 0;
+  document.getElementById('statProtCount').textContent = data.quarantine !== undefined ? data.quarantine : (data.quarantine_count || data.protected_files || 0);
+
+  // Destroy old charts
+  Object.values(_charts).forEach(c => c.destroy());
+  _charts = {};
+
+  // 7-day line chart
+  const days = data.by_day || [];
+  _charts.line = new Chart(document.getElementById('chartLine'), {
+    type: 'line',
+    data: {
+      labels: days.map(d => d.date.slice(5)),  // MM-DD
+      datasets: [
+        {label:'HIGH',   data: days.map(d=>d.HIGH),   borderColor:'#dc3545', backgroundColor:'rgba(220,53,69,.1)', tension:.3, fill:true},
+        {label:'MEDIUM', data: days.map(d=>d.MEDIUM), borderColor:'#ffc107', backgroundColor:'rgba(255,193,7,.1)',  tension:.3, fill:true},
+        {label:'LOW',    data: days.map(d=>d.LOW),    borderColor:'#198754', backgroundColor:'rgba(25,135,84,.1)',  tension:.3, fill:true},
+      ]
+    },
+    options: { plugins:{legend:{position:'top'}}, scales:{y:{beginAtZero:true, ticks:{stepSize:1}}} }
+  });
+
+  // Pie chart
+  _charts.pie = new Chart(document.getElementById('chartPie'), {
+    type: 'doughnut',
+    data: {
+      labels: ['HIGH','MEDIUM','LOW'],
+      datasets: [{data:[data.high||0, data.medium||0, data.low||0], backgroundColor:['#dc3545','#ffc107','#198754']}]
+    },
+    options: { plugins:{legend:{position:'bottom'}} }
+  });
+
+  // Bar chart — event types
+  const types  = Object.entries(data.by_type || {});
+  _charts.bar  = new Chart(document.getElementById('chartBar'), {
+    type: 'bar',
+    data: {
+      labels: types.map(([k])=>k.replace(/_/g,' ')),
+      datasets: [{label:'Событий', data: types.map(([,v])=>v), backgroundColor:'rgba(13,110,253,.7)'}]
+    },
+    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{beginAtZero:true}} }
+  });
+
+  // Bar chart — agents
+  const agents = Object.entries(data.by_agent || {});
+  _charts.agents = new Chart(document.getElementById('chartAgents'), {
+    type: 'bar',
+    data: {
+      labels: agents.map(([k])=>k),
+      datasets: [{label:'Событий', data: agents.map(([,v])=>v), backgroundColor:'rgba(102,16,242,.7)'}]
+    },
+    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{beginAtZero:true}} }
+  });
+
+  // Auto-refresh every 30s when tab is active
+  if (!_statsTimer) {
+    _statsTimer = setInterval(loadStatistics, 30000);
+  }
+}
+
+// ── Email settings ────────────────────────────────────────────────────────────
+async function loadEmailSettings() {
+  const data = await apiFetch('/settings/email');
+  if (!data) return;
+  document.getElementById('emailEnabled').checked = !!data.enabled;
+  document.getElementById('smtpHost').value      = data.smtp_host || 'smtp.gmail.com';
+  document.getElementById('smtpPort').value      = data.smtp_port || 587;
+  document.getElementById('smtpUser').value      = data.smtp_user || '';
+  document.getElementById('directorEmail').value = data.director_email || '';
+}
+
+async function saveEmailSettings() {
+  const msg = document.getElementById('emailMsg');
+  const payload = {
+    enabled:        document.getElementById('emailEnabled').checked,
+    smtp_host:      document.getElementById('smtpHost').value.trim(),
+    smtp_port:      parseInt(document.getElementById('smtpPort').value) || 587,
+    smtp_user:      document.getElementById('smtpUser').value.trim(),
+    smtp_password:  document.getElementById('smtpPass').value,
+    director_email: document.getElementById('directorEmail').value.trim(),
+  };
+  const r = await apiFetch('/settings/email', {method:'POST', body: JSON.stringify(payload)});
+  if (r) {
+    msg.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Настройки сохранены</span>';
+  } else {
+    msg.innerHTML = '<span class="text-danger">Ошибка сохранения</span>';
+  }
+}
+
+async function testEmail() {
+  const msg = document.getElementById('emailMsg');
+  msg.innerHTML = '<span class="text-muted">Отправка...</span>';
+  const r = await apiFetch('/settings/email/test', {method:'POST'});
+  if (r) {
+    msg.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Тестовый email отправлен</span>';
+  } else {
+    msg.innerHTML = '<span class="text-danger">Ошибка отправки — проверьте настройки</span>';
+  }
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+async function downloadReport(period) {
+  const url = `/reports/${period}`;
+  const r = await fetch(url, {headers:{'Authorization':`Bearer ${TOKEN}`}});
+  if (!r.ok) { alert('Ошибка генерации отчёта'); return; }
+  const blob  = await r.blob();
+  const fname = period === 'weekly' ? 'edr_weekly.pdf' : 'edr_monthly.pdf';
+  const a     = document.createElement('a');
+  a.href      = URL.createObjectURL(blob);
+  a.download  = fname;
+  a.click();
+}
+
+// ── Renderers ─────────────────────────────────────────────────────────────────
+function sevBadge(s) {
+  return `<span class="badge-sev badge-${s||'LOW'}">${s||'—'}</span>`;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const s = String(ts);
+  const d = new Date(s.includes('Z')||s.includes('+') ? s : s+'Z');
+  return d.toLocaleString('ru-RU', {hour12:false}).replace(',','');
+}
+
+function renderAlerts(alerts) {
+  const tbody = document.getElementById('alertsBody');
+  if (!alerts.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет активных алертов</td></tr>';
+    return;
+  }
+  tbody.innerHTML = alerts.map(a => `
+    <tr class="clickable-row ${a.severity==='HIGH'?'alert-row-HIGH':''}" onclick="showAlertDetail(${a.id})">
+      <td>${fmtTime(a.timestamp)}</td>
+      <td><code>${escHtml(a.agent_id||'—')}</code></td>
+      <td><span class="fw-semibold">${escHtml(a.alert_type)}</span></td>
+      <td>${sevBadge(a.severity)}</td>
+      <td class="text-truncate" style="max-width:280px" title="${escHtml(a.description||'')}">${escHtml(a.description||'')}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn btn-sm btn-outline-success py-0" onclick="resolveAlert(${a.id})">
+          <i class="bi bi-check2"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+function renderEvents(events) {
+  const tbody = document.getElementById('eventsBody');
+  if (!events.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет событий</td></tr>';
+    return;
+  }
+  tbody.innerHTML = events.slice(0,200).map(e => `
+    <tr class="clickable-row" onclick="showEventDetail(${e.id})">
+      <td>${fmtTime(e.timestamp)}</td>
+      <td><code>${escHtml(e.agent_id||'—')}</code></td>
+      <td>${escHtml(e.user||'—')}</td>
+      <td>${escHtml(e.event_type)}</td>
+      <td>${sevBadge(e.severity)}</td>
+      <td class="text-muted text-truncate" style="max-width:220px" title="${escHtml(e.details||'')}">${escHtml(shortDetails(e.details))}</td>
+    </tr>`).join('');
+}
+
+function renderAgents(agents) {
+  const grid = document.getElementById('agentsGrid');
+  if (!agents.length) { grid.innerHTML = '<div class="col-12 text-muted">Агентов нет</div>'; return; }
+  grid.innerHTML = agents.map(a => `
+    <div class="col-sm-6 col-lg-4">
+      <div class="card agent-card shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h6 class="mb-0"><i class="bi bi-pc-display me-1"></i>${escHtml(a.hostname||a.agent_id)}</h6>
+            <span class="badge rounded-pill px-2 ${a.is_online?'online-badge':'offline-badge'}">
+              ${a.is_online?'Онлайн':'Офлайн'}
+            </span>
+          </div>
+          <div class="text-muted small">
+            <div><i class="bi bi-hash me-1"></i>${escHtml(a.agent_id)}</div>
+            <div><i class="bi bi-network-wired me-1"></i>${escHtml(a.ip_address||'—')}</div>
+            <div><i class="bi bi-windows me-1"></i>${escHtml(a.os_info||'—')}</div>
+            <div class="mt-1"><i class="bi bi-clock me-1"></i>${fmtTime(a.last_seen)}</div>
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderPrivileges(privs) {
+  const tbody = document.getElementById('privBody');
+  if (!privs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет привилегий</td></tr>'; return;
+  }
+  const yes = '<i class="bi bi-check-circle-fill text-success"></i>';
+  const no  = '<i class="bi bi-x-circle text-muted"></i>';
+  tbody.innerHTML = privs.map(p => `
+    <tr>
+      <td>${escHtml(p.username)}</td>
+      <td>${p.agent_id||'<span class="text-muted">все</span>'}</td>
+      <td class="text-center">${p.can_unlock_files?yes:no}</td>
+      <td class="text-center">${p.can_view_pii?yes:no}</td>
+      <td>${escHtml(p.granted_by||'—')}</td>
+      <td>${fmtTime(p.granted_at)}</td>
+    </tr>`).join('');
+}
+
+// ── Detail modal ──────────────────────────────────────────────────────────────
+
+function _detailRow(label, value, html = false) {
+  if (!value && value !== 0) return '';
+  return `<div class="detail-row">
+    <span class="detail-label">${label}</span>
+    <span class="detail-value">${html ? value : escHtml(String(value))}</span>
+  </div>`;
+}
+
+function _parseDetails(raw) {
+  if (!raw) return {};
+  try { return typeof raw === 'object' ? raw : JSON.parse(raw); }
+  catch { return {raw: String(raw)}; }
+}
+
+function _eventIcon(evType) {
+  const map = {
+    'pii_detected':               'bi-file-earmark-person-fill text-warning',
+    'usb_pii_copy_blocked':       'bi-usb-drive-fill text-danger',
+    'usb_inserted':               'bi-usb-plug-fill text-primary',
+    'file_usb_copy_blocked':      'bi-usb-drive-fill text-danger',
+    'messenger_pii_send_blocked': 'bi-chat-fill text-danger',
+    'suspicious_process':         'bi-bug-fill text-danger',
+    'clipboard_block':            'bi-clipboard-x-fill text-danger',
+    'clipboard_pii':              'bi-clipboard-fill text-warning',
+    'file_access_granted':        'bi-unlock-fill text-success',
+    'file_opened_no_pii':         'bi-file-check-fill text-secondary',
+    'unauthorized_access_attempt':'bi-shield-x-fill text-danger',
+    'brute_force_attempt':        'bi-exclamation-octagon-fill text-danger',
+    'file_read':                  'bi-eye-fill text-secondary',
+    'file_modified':              'bi-pencil-fill text-warning',
+    'file_moved':                 'bi-arrow-left-right text-warning',
+    'file_modified_with_pii':     'bi-pencil-fill text-warning',
+    'file_deleted_with_pii':      'bi-trash3-fill text-danger',
+    'file_quarantined':           'bi-folder-x-fill text-warning',
+    'file_restored':              'bi-arrow-counterclockwise text-success',
+  };
+  return map[evType] || 'bi-info-circle-fill text-secondary';
+}
+
+function _buildEventBody(e) {
+  const d    = _parseDetails(e.details);
+  const icon = _eventIcon(e.event_type);
+
+  let threatBanner = '';
+  if (e.severity === 'HIGH') {
+    const isBrute   = e.event_type === 'brute_force_attempt';
+    const bTitle    = isBrute ? 'BRUTE FORCE ATTACK — УГРОЗА БЕЗОПАСНОСТИ' : 'УГРОЗА БЕЗОПАСНОСТИ';
+    const bDesc     = isBrute
+      ? 'Многократные попытки несанкционированного доступа к файлу с ПД!'
+      : 'Обнаружена критическая угроза. Требуется немедленное реагирование.';
+    threatBanner = `
+      <div class="alert alert-danger d-flex align-items-center gap-3 mb-3 py-2">
+        <i class="bi bi-shield-exclamation fs-3 flex-shrink-0"></i>
+        <div><div class="fw-bold">${bTitle}</div><div class="small">${bDesc}</div></div>
+      </div>`;
+  }
+
+  let piiSection = '';
+  if (d.pii_types) {
+    const types  = String(d.pii_types).split(',').filter(Boolean);
+    const colors = {IIN:'danger', PHONE:'primary', EMAIL:'info', FIO:'success', DOB:'warning'};
+    piiSection   = types.map(t => `<span class="badge bg-${colors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+  }
+
+  const isUsb = e.event_type.includes('usb') || d.drive || d.usb_drive;
+  const isBlocked = d.action==='заблокировано' || d.blocked===true || String(d.blocked)==='True';
+  let usb_section = '';
+  if (isUsb) {
+    const drive      = d.drive || d.usb_drive || d.drive_label || '—';
+    const blockedBadge = isBlocked
+      ? '<span class="usb-block-badge"><i class="bi bi-shield-x me-1"></i>Заблокировано</span>'
+      : '<span class="usb-allow-badge"><i class="bi bi-shield-check me-1"></i>Разрешено</span>';
+    usb_section = `
+      <div class="alert alert-${isBlocked?'danger':'success'} py-2 mt-3 mb-0">
+        <div class="d-flex align-items-center gap-2">
+          <i class="bi bi-usb-drive-fill fs-5"></i>
+          <div>
+            <div class="fw-semibold">USB-накопитель: ${escHtml(drive)}</div>
+            <div class="small mt-1">${blockedBadge}</div>
+            ${d.reason ? `<div class="small text-muted mt-1">${escHtml(d.reason)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Screenshot section for HIGH events
+  let scrSection = '';
+  if (d.screenshot) {
+    scrSection = `
+      <div class="mt-3">
+        <div class="fw-semibold small text-muted mb-1">СКРИНШОТ</div>
+        <img src="/screenshots/${escHtml(d.screenshot)}" class="img-fluid rounded border"
+             style="max-height:300px" onerror="this.style.display='none'"/>
+      </div>`;
+  }
+
+  return threatBanner + `
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <i class="bi ${icon} fs-4"></i>
+      <div><div class="fw-bold fs-6">${escHtml(e.event_type)}</div><div>${sevBadge(e.severity)}</div></div>
+    </div>
+    <div class="border rounded p-3 bg-light">
+      ${_detailRow('Время', fmtTime(e.timestamp))}
+      ${_detailRow('Агент', e.agent_id)}
+      ${_detailRow('Пользователь', e.user)}
+      ${_detailRow('Тип события', e.event_type)}
+      ${piiSection ? `<div class="detail-row"><span class="detail-label">Типы ПД</span><span class="detail-value">${piiSection}</span></div>` : ''}
+      ${d.confidence!==undefined ? _detailRow('Уверенность', (parseFloat(d.confidence)*100).toFixed(0)+'%') : ''}
+      ${_detailRow('Файл', d.file_name||(d.file?d.file.split(/[\\/]/).pop():''))}
+      ${_detailRow('Полный путь', d.file)}
+      ${_detailRow('USB-диск', d.drive||d.usb_drive)}
+      ${_detailRow('Приложение', d.app)}
+      ${_detailRow('Процесс', d.process||d.process_name)}
+      ${_detailRow('Действие', d.action)}
+      ${_detailRow('Причина', d.reason)}
+      ${_detailRow('Сообщение', d.message)}
+    </div>
+    ${usb_section}${scrSection}`;
+}
+
+function _buildAlertBody(a) {
+  const isUsb = a.alert_type.includes('USB') || (a.description||'').includes('USB');
+  let extra = '';
+  if (isUsb) {
+    const m = (a.description||'').match(/файла?\s+([^\s]+)\s+на\s+USB\s+([^\s]+)/i);
+    if (m) extra = `
+      <div class="alert alert-danger py-2 mt-3">
+        <i class="bi bi-usb-drive-fill me-2"></i>
+        <strong>USB:</strong> ${escHtml(m[2])} &nbsp;|&nbsp;
+        <strong>Файл:</strong> ${escHtml(m[1])} &nbsp;|&nbsp;
+        <span class="usb-block-badge"><i class="bi bi-shield-x me-1"></i>Заблокировано</span>
+      </div>`;
+  }
+  return `
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <i class="bi bi-exclamation-triangle-fill text-danger fs-4"></i>
+      <div><div class="fw-bold fs-6">${escHtml(a.alert_type)}</div><div>${sevBadge(a.severity)}</div></div>
+    </div>
+    <div class="border rounded p-3 bg-light">
+      ${_detailRow('Время', fmtTime(a.timestamp))}
+      ${_detailRow('Агент', a.agent_id)}
+      ${_detailRow('Тип алерта', a.alert_type)}
+      ${_detailRow('Статус', a.is_resolved ? 'Обработан' : 'Активный')}
+      <div class="detail-row">
+        <span class="detail-label">Описание</span>
+        <span class="detail-value">${escHtml(a.description||'—')}</span>
+      </div>
+    </div>${extra}`;
+}
+
+function showEventDetail(eventId) {
+  const e = allEvents.find(x => x.id === eventId);
+  if (!e) return;
+  const sev = e.severity || 'LOW';
+  document.getElementById('detailModalHeader').className = `modal-header modal-header-${sev}`;
+  document.getElementById('detailModalLabel').innerHTML  = `<i class="bi bi-info-circle me-2"></i>Событие #${e.id}`;
+  document.getElementById('detailModalBody').innerHTML   = _buildEventBody(e);
+  document.getElementById('detailModalActions').innerHTML = '';
+  detailModal.show();
+}
+
+function showAlertDetail(alertId) {
+  const a = allAlerts.find(x => x.id === alertId);
+  if (!a) return;
+  const sev = a.severity || 'LOW';
+  document.getElementById('detailModalHeader').className = `modal-header modal-header-${sev}`;
+  document.getElementById('detailModalLabel').innerHTML  = `<i class="bi bi-exclamation-triangle me-2"></i>Алерт #${a.id}`;
+  document.getElementById('detailModalBody').innerHTML   = _buildAlertBody(a);
+  document.getElementById('detailModalActions').innerHTML = !a.is_resolved
+    ? `<button class="btn btn-success btn-sm" onclick="resolveAlertFromModal(${a.id})">
+        <i class="bi bi-check2-circle me-1"></i>Отметить обработанным
+       </button>`
+    : '';
+  detailModal.show();
+}
+
+async function resolveAlertFromModal(id) {
+  await resolveAlert(id);
+  detailModal.hide();
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+async function resolveAlert(id) {
+  await apiFetch(`/alerts/${id}/resolve`, {method:'POST'});
+  const found = allAlerts.find(a => a.id === id);
+  if (found) found.is_resolved = true;
+  updateAlertCounters();
+  renderAlerts(allAlerts.filter(a => !a.is_resolved));
+}
+
+function filterEvents(sev) {
+  currentSevFilter = sev;
+  ['evAll','evHigh','evMed','evLow'].forEach(id => document.getElementById(id).classList.remove('active'));
+  const map = {'':'evAll','HIGH':'evHigh','MEDIUM':'evMed','LOW':'evLow'};
+  document.getElementById(map[sev]).classList.add('active');
+  renderEvents(allEvents.filter(e => !sev || e.severity === sev));
+}
+
+async function grantPrivilege() {
+  const msg     = document.getElementById('privMsg');
+  const payload = {
+    username:        document.getElementById('privUser').value.trim(),
+    agent_id:        document.getElementById('privAgent').value.trim() || null,
+    can_unlock_files: document.getElementById('privUnlock').checked,
+    can_view_pii:    document.getElementById('privViewPii').checked,
+  };
+  if (!payload.username) { msg.innerHTML = '<span class="text-danger">Укажите пользователя</span>'; return; }
+  const r = await fetch('/privileges', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
+    body: JSON.stringify(payload),
+  });
+  if (r.ok) {
+    msg.innerHTML = '<span class="text-success">Привилегия выдана</span>';
+    await loadPrivileges();
+  } else {
+    const err = await r.json().catch(()=>({}));
+    msg.innerHTML = `<span class="text-danger">${escHtml(err.detail||'Ошибка')}</span>`;
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS() {
+  if (ws) ws.close();
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen  = () => { document.getElementById('wsDot').className = 'ws-dot ws-on'; };
+  ws.onclose = () => { document.getElementById('wsDot').className = 'ws-dot ws-off'; setTimeout(connectWS, 5000); };
+  ws.onmessage = ({data}) => { try { handleWSMessage(JSON.parse(data)); } catch {} };
+}
+
+function handleWSMessage(msg) {
+  if (msg.type === 'alert') {
+    allAlerts.unshift({
+      id: msg.id, agent_id: msg.agent_id, alert_type: msg.alert_type,
+      severity: msg.severity, description: msg.description,
+      is_resolved: false, timestamp: msg.timestamp,
+    });
+    updateAlertCounters();
+    renderAlerts(allAlerts.filter(a => !a.is_resolved));
+    if (msg.severity === 'HIGH') flashHighAlert(msg);
+  } else if (msg.type === 'event') {
+    const newEv = {
+      id: Date.now(), agent_id: msg.agent_id, event_type: msg.event_type,
+      severity: msg.severity, timestamp: msg.timestamp, user: msg.user||null,
+      details: msg.details ? JSON.stringify(msg.details) : null,
+    };
+    allEvents.unshift(newEv);
+    document.getElementById('statEvents').textContent = allEvents.length;
+    renderEvents(allEvents.filter(e => !currentSevFilter || e.severity===currentSevFilter));
+    if (msg.event_type === 'pii_detected') loadPiiCount();
+  } else if (msg.type === 'agent_update') {
+    loadAgents();
+  } else if (msg.type === 'quarantine_update' || msg.type === 'quarantine_restored' || msg.type === 'quarantine_deleted') {
+    loadPiiCount();
+    const qTab = document.getElementById('tabQuarantine');
+    if (qTab && qTab.classList.contains('show')) loadQuarantine();
+  } else if (msg.type === 'alert_resolved') {
+    const found = allAlerts.find(a => a.id===msg.id);
+    if (found) found.is_resolved = true;
+    updateAlertCounters();
+    renderAlerts(allAlerts.filter(a => !a.is_resolved));
+  }
+}
+
+function flashHighAlert(msg) {
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;min-width:340px;';
+  toast.innerHTML = `
+    <div class="alert alert-danger alert-dismissible shadow" role="alert">
+      <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>HIGH алерт</strong><br>
+      <small>${escHtml(msg.description||msg.alert_type)}</small><br>
+      <button class="btn btn-sm btn-outline-light mt-1"
+              onclick="showAlertDetail(${msg.id});this.closest('div.alert').parentElement.remove()">
+        <i class="bi bi-eye me-1"></i>Подробнее
+      </button>
+      <button type="button" class="btn-close btn-close-white" onclick="this.parentElement.parentElement.remove()"></button>
+    </div>`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove && toast.remove(), 10000);
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function shortDetails(raw) {
+  if (!raw) return '';
+  try {
+    const obj  = JSON.parse(raw);
+    const f    = obj.file_name || obj.file || obj.process_name || obj.drive || obj.usb_drive || '';
+    const name = f ? f.split(/[\\/]/).pop() : '';
+    const reason = obj.reason ? ` — ${obj.reason}` : '';
+    return name ? escHtml(name+reason) : escHtml(JSON.stringify(obj).slice(0,60));
+  } catch { return escHtml(String(raw).slice(0,60)); }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  if (TOKEN) {
+    try {
+      const r = await fetch('/agents', {headers:{'Authorization':`Bearer ${TOKEN}`}});
+      if (r.ok) {
+        const payload = JSON.parse(atob(TOKEN.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+        showApp(payload.sub);
+        return;
+      }
+    } catch {}
+    localStorage.removeItem('edr_token');
+    TOKEN = null;
+  }
+})();
+</script>
+</body>
+</html>

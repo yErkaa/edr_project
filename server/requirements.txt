@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+jinja2
+python-dotenv
+python-jose[cryptography]
+bcrypt
+python-multipart
+pydantic
+websockets

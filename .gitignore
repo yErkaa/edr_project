@@ -1,0 +1,28 @@
+﻿# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# PyCharm
+.idea/
+
+# EDR runtime data
+agent/data/buffer.db
+agent/data/attempts.json
+agent/lock/
+server/edr.db
+*.log
+
+# Quarantine (если вдруг попало в проект)
+EDR_Quarantine/
+
+# Models (большие, обучаются отдельно)
+server/ml_model/*.pkl
+
+# Secrets
+email_settings.json
+.env
+*.key

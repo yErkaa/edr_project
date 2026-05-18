@@ -358,7 +358,7 @@ class DirectoryWatcher:
         except Exception as e:
             logger.info(f"scan {path}: {e}")
             return
-        if not is_pii:
+        if not is_pii or confidence < 0.15:
             return
 
         # USB drive check
@@ -378,7 +378,8 @@ class DirectoryWatcher:
             self._pii_files.add(path)
 
         extra = {"confidence": confidence, "pii_types": ",".join(pii_types)}
-        self.callback(path, "pii_detected", "MEDIUM", extra)
+        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+        self.callback(path, "pii_detected", severity, extra)
 
         if self.quarantine_on_detect:
             with self._lock:

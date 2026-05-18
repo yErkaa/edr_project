@@ -337,12 +337,13 @@ class Agent:
 
                 try:
                     is_pii, confidence, pii_types = self.scanner.scan_file(path)
-                    if is_pii:
+                    if is_pii and confidence >= 0.15:
                         found += 1
                         self.pii_files.add(path)
+                        severity = "MEDIUM" if confidence > 0.50 else "LOW"
                         self.send_event(
                             "pii_detected",
-                            "MEDIUM",
+                            severity,
                             {
                                 "file": path,
                                 "file_name": fname,

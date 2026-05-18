@@ -2,7 +2,7 @@
 import sys
 import os
 
-# Гарантируем, что директория агента в sys.path — иначе импорты file_watcher и др. не найдутся
+# Гарантируем, что директория агента в sys.path
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _AGENT_DIR not in sys.path:
     sys.path.insert(0, _AGENT_DIR)
@@ -379,7 +379,7 @@ class Agent:
 
         logger.info(f"Первичное сканирование завершено. ПД-файлов: {found}")
 
-    # ── Callback от file_watcher ──────────────────────────────────────────────
+    # ── Callback от DirectoryWatcher ─────────────────────────────────────────
 
     def on_usb_pii_event(self, path: str):
         """Called when a PII file appears on a USB drive — block it."""

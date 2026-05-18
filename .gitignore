@@ -26,3 +26,12 @@ server/ml_model/*.pkl
 email_settings.json
 .env
 *.key
+
+# Runtime (добавлено после первого git add)
+agent/agent_buffer.db
+agent/screenshots/
+server/screenshots/
+
+# ML datasets (синтетические ПД, не нужны в репо)
+server/ml_model/datasets/*.csv
+server/ml_model/datasets/*.json

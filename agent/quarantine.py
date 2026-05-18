@@ -455,7 +455,16 @@ class DirectoryWatcher:
         if not os.path.isfile(dest) or is_quarantine_stub(dest):
             return
 
-        # USB drive check for destination
+        try:
+            is_pii, confidence, pii_types = self.scanner.scan_file(dest)
+        except Exception as e:
+            logger.info(f"scan moved {dest}: {e}")
+            return
+
+        if not is_pii or confidence < 0.15:
+            return
+
+        # USB drive check for destination — only reached if file contains PII
         dest_lower = dest.lower()
         with self._lock:
             usb_root = next(
@@ -464,15 +473,6 @@ class DirectoryWatcher:
             cb = self._usb_callback if usb_root else None
         if usb_root and cb:
             cb(dest)
-            return
-
-        try:
-            is_pii, confidence, pii_types = self.scanner.scan_file(dest)
-        except Exception as e:
-            logger.info(f"scan moved {dest}: {e}")
-            return
-
-        if not is_pii or confidence < 0.15:
             return
 
         with self._lock:

@@ -22,7 +22,7 @@ import psutil
 
 from pii_scanner import PIIScanner
 from process_monitor import scan_processes
-from response_handler import handle_high_event
+from response_handler import handle_high_event, monitor_clipboard
 from usb_monitor import USBMonitor
 from quarantine import (
     PROTECTED_EXTS, DirectoryWatcher,
@@ -527,6 +527,16 @@ class Agent:
                 logger.error(f"monitor_usb: {e}")
             time.sleep(2)
 
+    # ── Мониторинг буфера обмена ──────────────────────────────────────────────
+
+    def _monitor_clipboard(self):
+        try:
+            logger.info("Clipboard-монитор запущен.")
+            monitor_clipboard()
+            logger.warning("Clipboard-монитор завершился штатно (неожиданно).")
+        except Exception as e:
+            logger.error(f"monitor_clipboard завершился с ошибкой: {e}", exc_info=True)
+
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self):
@@ -547,6 +557,7 @@ class Agent:
             threading.Thread(target=self.monitor_usb, daemon=True),
             threading.Thread(target=self._flush_buffer, daemon=True),
             threading.Thread(target=self._heartbeat, daemon=True),
+            threading.Thread(target=self._monitor_clipboard, daemon=True),
         ]
         for t in threads:
             t.start()

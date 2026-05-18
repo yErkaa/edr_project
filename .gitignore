@@ -10,10 +10,12 @@ __pycache__/
 .idea/
 
 # EDR runtime data
+agent/data/agent.lock
+agent/data/*.lock
 agent/data/buffer.db
 agent/data/attempts.json
-agent/lock/
 server/edr.db
+server/*.db
 *.log
 
 # Quarantine (если вдруг попало в проект)

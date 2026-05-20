@@ -660,7 +660,7 @@ async function loadPdFiles() {
 }
 
 async function requestQuarantine(id) {
-  if (!confirm('Отправить файл в карантин? Файл будет удалён с компьютера и заблокирован.')) return;
+  if (!confirm('Переместить файл в карантин?\n\nФайл будет перемещён в C:\\EDR_Quarantine\\ на компьютере ученика.\nОн НЕ удаляется — его можно восстановить через вкладку «Карантин».')) return;
   const r = await fetch(`/pd-files/${id}/request-quarantine`, {
     method: 'POST', headers: {'Authorization': 'Bearer ' + localStorage.getItem('edr_token')}
   });

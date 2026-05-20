@@ -1070,16 +1070,22 @@ async def quarantine_done(
     pd_file.pending_quarantine = False
     if data.success:
         pd_file.is_blocked = True
-        qf = QuarantineFile(
-            agent_id=pd_file.agent_id,
-            original_path=pd_file.file_path,
-            quarantine_path=data.quarantine_path,
-            filename=pd_file.file_name,
-            pii_types=pd_file.pii_types,
-            confidence=pd_file.confidence,
-        )
-        db.add(qf)
-        logger.info(f"Файл в карантине: {pd_file.file_name}")
+        if data.quarantine_path:
+            # Only create a new QuarantineFile record when agent actually moved the file.
+            # Empty quarantine_path means file was already a stub (pre-existing quarantine) —
+            # a QuarantineFile record already exists from the old automatic flow.
+            qf = QuarantineFile(
+                agent_id=pd_file.agent_id,
+                original_path=pd_file.file_path,
+                quarantine_path=data.quarantine_path,
+                filename=pd_file.file_name,
+                pii_types=pd_file.pii_types,
+                confidence=pd_file.confidence,
+            )
+            db.add(qf)
+            logger.info(f"Файл в карантине: {pd_file.file_name}")
+        else:
+            logger.info(f"Файл уже был в карантине (заглушка): {pd_file.file_name}")
 
     await db.commit()
     if data.success:

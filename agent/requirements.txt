@@ -7,3 +7,8 @@ win10toast
 pyperclip
 setuptools<71
 python-dotenv
+python-docx
+openpyxl
+python-pptx
+pdfplumber
+Pillow

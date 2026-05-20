@@ -202,12 +202,15 @@ class PIIScanner:
 
         def _do_scan():
             if ext in _TEXT_EXTS:
-                try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read(500_000)
-                    return self.scan_text(content)
-                except Exception:
-                    return False, 0.0, []
+                content = ""
+                for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+                    try:
+                        with open(path, "r", encoding=enc) as f:
+                            content = f.read(500_000)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                return self.scan_text(content)
             # Office / PDF
             try:
                 content = _extract_text(path, ext)

@@ -189,6 +189,7 @@ class Agent:
         self._registered = False
         self.pii_files: set = set()
         self.dir_watcher: DirectoryWatcher | None = None
+        self._flush_now = threading.Event()
 
     # ── Регистрация ───────────────────────────────────────────────────────────
 
@@ -237,7 +238,8 @@ class Agent:
 
     def _flush_buffer(self):
         while self.running:
-            time.sleep(30)
+            self._flush_now.wait(timeout=30)
+            self._flush_now.clear()
             rows = self.buffer.get_unsent()
             if not rows:
                 continue
@@ -282,6 +284,7 @@ class Agent:
                     if not self._registered:
                         logger.info("Сервер снова доступен, переподключаемся...")
                         self.register()
+                        self._flush_now.set()
                 else:
                     self._registered = False
             except Exception:
@@ -550,6 +553,8 @@ class Agent:
                 "Сервер недоступен при старте — работаем в автономном режиме, "
                 "события будут буферизованы."
             )
+        else:
+            self._flush_now.set()
 
         self.initial_scan()
         self.watch_files()

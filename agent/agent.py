@@ -294,13 +294,6 @@ class Agent:
 
     # ── Первичное сканирование ────────────────────────────────────────────────
 
-    @staticmethod
-    def _dir_entry_count(path: str) -> int:
-        try:
-            return len(os.listdir(path))
-        except Exception:
-            return 0
-
     def _scan_path(self, root_path: str, shallow: bool = False) -> int:
         """Scan root_path, return count of newly found PII files.
         shallow=True → top-level files only, skip all subdirectories."""
@@ -314,18 +307,6 @@ class Agent:
             if shallow and norm_here != norm_root:
                 dirs.clear()
                 continue
-
-            # Skip current directory if it has too many files (e.g. Telegram Desktop)
-            if len(files) > 50:
-                logger.info(f"Пропускаем папку ({len(files)} файлов): {root}")
-                dirs.clear()
-                continue
-
-            # Don't recurse into subdirectories with 50+ entries
-            dirs[:] = [
-                d for d in dirs
-                if self._dir_entry_count(os.path.join(root, d)) <= 50
-            ]
 
             for fname in files:
                 path = os.path.join(root, fname)

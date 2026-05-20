@@ -170,6 +170,7 @@ class DirectoryWatcher:
         self._quarantining: set[str] = set()   # paths currently being moved
         self._lock                = threading.Lock()
         self._dedup: dict[str, float] = {}
+        self._mtime_cache: dict[str, float] = {}
         self._usb_paths: set[str] = set()
         self._usb_callback: Callable | None = None
         # Cross-dir move tracking: basename → (src_path, monotonic_time)
@@ -346,6 +347,14 @@ class DirectoryWatcher:
         if is_quarantine_stub(path):
             return  # our own stub
 
+        # Cache mtime now so spurious _on_modified events are suppressed
+        try:
+            mtime = os.path.getmtime(path)
+            with self._lock:
+                self._mtime_cache[path] = mtime
+        except Exception:
+            pass
+
         # Cross-dir move detection: if a file with this basename recently left another
         # watched dir via RENAMED_OLD, treat this ADDED event as a move.
         src = self._pop_move_src(os.path.basename(path))
@@ -400,8 +409,18 @@ class DirectoryWatcher:
         if is_quarantine_stub(path):
             return
 
+        # Проверяем что файл реально изменился (mtime), а не просто был прочитан
+        try:
+            mtime = os.path.getmtime(path)
+        except Exception:
+            return
         with self._lock:
             known = path in self._pii_files
+            last_mtime = self._mtime_cache.get(path, 0.0)
+        if mtime <= last_mtime:
+            return  # файл не менялся — ложное событие от Windows при копировании
+        with self._lock:
+            self._mtime_cache[path] = mtime
 
         if not known:
             if not os.path.isfile(path):
@@ -418,7 +437,7 @@ class DirectoryWatcher:
             severity = "MEDIUM" if confidence > 0.50 else "LOW"
         else:
             extra    = {}
-            severity = "MEDIUM"  # known PII file implies high confidence
+            severity = "MEDIUM"
 
         self.callback(path, "file_modified", severity, extra)
 

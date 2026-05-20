@@ -1,10 +1,7 @@
-"""
-Добавляет новые колонки в существующую БД БЕЗ удаления данных.
-Запускать один раз после git pull на ноутбуке 1:
-
-    cd C:\Users\dinar\PycharmProjects\edr
-    .venv\Scripts\python server\add_columns.py
-"""
+# Добавляет новые колонки в существующую BD без удаления данных.
+# Запускать один раз после git pull на ноутбуке 1:
+#   cd C:/Users/dinar/PycharmProjects/edr
+#   .venv/Scripts/python server/add_columns.py
 import asyncio
 import os
 import sys

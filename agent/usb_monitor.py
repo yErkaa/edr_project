@@ -8,13 +8,14 @@ _DEDUP_WINDOW    = 3   # секунды — не сообщать о том же
 
 
 def _get_removable_drives() -> list[str]:
-    """Возвращает список съёмных дисков типа ['E:', 'F:', ...]."""
+    """Возвращает список съёмных дисков типа ['E:\\', ...]."""
     drives = []
+    GetDriveTypeW = ctypes.windll.kernel32.GetDriveTypeW
     bitmask = ctypes.windll.kernel32.GetLogicalDrives()
     for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
         if bitmask & 1:
             drive = f"{letter}:\\"
-            if ctypes.windll.kernel32.GetDriveType(drive) == _DRIVE_REMOVABLE:
+            if GetDriveTypeW(drive) == _DRIVE_REMOVABLE:
                 drives.append(os.path.normpath(drive))
         bitmask >>= 1
     return drives

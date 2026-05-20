@@ -578,41 +578,58 @@ async def restore_quarantine(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(QuarantineFile).where(QuarantineFile.id == file_id))
-    qf     = result.scalar_one_or_none()
+    qf = result.scalar_one_or_none()
     if not qf:
         raise HTTPException(status_code=404, detail="Файл не найден")
     if qf.is_restored:
         raise HTTPException(status_code=400, detail="Файл уже восстановлен")
 
-    if not os.path.isfile(qf.quarantine_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Файл карантина не найден на диске: {qf.quarantine_path}"
-        )
-
-    import shutil
-    try:
-        # Remove stub at original path if present
-        if os.path.isfile(qf.original_path):
-            try:
-                with open(qf.original_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(300)
-                if "[EDR-QUARANTINE]" in content:
-                    os.remove(qf.original_path)
-            except Exception:
-                pass
-
-        os.makedirs(os.path.dirname(os.path.abspath(qf.original_path)), exist_ok=True)
-        shutil.move(qf.quarantine_path, qf.original_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка восстановления: {e}")
-
-    qf.is_restored = True
+    # Файл карантина находится на агенте (ноутбук 2), не на сервере.
+    # Ставим флаг — агент сам выполнит restore при следующем polling.
+    qf.pending_restore = True
     await db.commit()
-    logger.info(f"Файл восстановлен: {qf.filename} by {current_user.username}")
+    logger.info(f"Восстановление запрошено: {qf.filename} by {current_user.username}")
+    return {"status": "ok", "message": "Команда восстановления отправлена агенту"}
 
+
+@app.get("/quarantine/pending-restore")
+async def pending_restore(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Агент спрашивает: есть ли файлы для восстановления?"""
+    result = await db.execute(
+        select(QuarantineFile).where(
+            QuarantineFile.agent_id == agent_id,
+            QuarantineFile.pending_restore == True,  # noqa: E712
+            QuarantineFile.is_restored == False,      # noqa: E712
+        )
+    )
+    files = result.scalars().all()
+    return [
+        {"id": f.id, "quarantine_path": f.quarantine_path, "original_path": f.original_path}
+        for f in files
+    ]
+
+
+@app.post("/quarantine/{file_id}/restore-done")
+async def restore_done(
+    file_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Агент сообщает что восстановление выполнено."""
+    result = await db.execute(select(QuarantineFile).where(QuarantineFile.id == file_id))
+    qf = result.scalar_one_or_none()
+    if not qf:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    qf.pending_restore = False
+    if data.get("success"):
+        qf.is_restored = True
+        logger.info(f"Файл восстановлен агентом: {qf.filename}")
+    await db.commit()
     await manager.broadcast({"type": "quarantine_restored", "id": file_id})
-    return {"status": "ok", "restored_to": qf.original_path}
+    return {"status": "ok"}
 
 
 @app.delete("/quarantine/{file_id}", summary="Удалить файл из карантина навсегда")

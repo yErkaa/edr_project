@@ -527,35 +527,62 @@ class Agent:
     # ── Polling команд карантина от сервера ───────────────────────────────────
 
     def _poll_quarantine_commands(self):
-        """Каждые 5 сек спрашивает сервер: есть ли файлы для карантина?"""
+        """Каждые 5 сек выполняет команды карантина и восстановления от сервера."""
         while self.running:
-            try:
-                r = requests.get(
-                    f"{SERVER_BASE}/pd-files/pending-quarantine",
-                    params={"agent_id": AGENT_ID},
-                    timeout=5,
-                )
-                if r.status_code == 200:
-                    for item in r.json():
-                        fid  = item["id"]
-                        path = item["file_path"]
-                        if os.path.isfile(path) and not is_quarantine_stub(path):
-                            ok, qpath = quarantine_file(path)
-                            if ok and qpath:
-                                self._notify_quarantine(path, qpath, [], 0.0)
-                        else:
-                            ok, qpath = False, ""
-                        try:
-                            requests.post(
-                                f"{SERVER_BASE}/pd-files/{fid}/quarantine-done",
-                                json={"quarantine_path": qpath, "success": ok},
-                                timeout=5,
-                            )
-                        except Exception:
-                            pass
-            except Exception as e:
-                logger.debug(f"poll_quarantine_commands: {e}")
+            self._run_pending_quarantines()
+            self._run_pending_restores()
             time.sleep(5)
+
+    def _run_pending_quarantines(self):
+        try:
+            r = requests.get(
+                f"{SERVER_BASE}/pd-files/pending-quarantine",
+                params={"agent_id": AGENT_ID}, timeout=5,
+            )
+            if r.status_code != 200:
+                return
+            for item in r.json():
+                fid, path = item["id"], item["file_path"]
+                if os.path.isfile(path) and not is_quarantine_stub(path):
+                    ok, qpath = quarantine_file(path)
+                    if ok and qpath:
+                        self._notify_quarantine(path, qpath, [], 0.0)
+                else:
+                    ok, qpath = False, ""
+                try:
+                    requests.post(
+                        f"{SERVER_BASE}/pd-files/{fid}/quarantine-done",
+                        json={"quarantine_path": qpath, "success": ok},
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"pending_quarantines: {e}")
+
+    def _run_pending_restores(self):
+        try:
+            r = requests.get(
+                f"{SERVER_BASE}/quarantine/pending-restore",
+                params={"agent_id": AGENT_ID}, timeout=5,
+            )
+            if r.status_code != 200:
+                return
+            for item in r.json():
+                fid = item["id"]
+                from quarantine import restore_file
+                ok = restore_file(item["quarantine_path"], item["original_path"])
+                if ok:
+                    logger.info(f"Файл восстановлен: {item['original_path']}")
+                try:
+                    requests.post(
+                        f"{SERVER_BASE}/quarantine/{fid}/restore-done",
+                        json={"success": ok}, timeout=5,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"pending_restores: {e}")
 
     # ── Запуск ────────────────────────────────────────────────────────────────
 

@@ -69,6 +69,7 @@ class QuarantineFile(Base):
     confidence = Column(Float, default=0.0)
     timestamp = Column(DateTime, default=datetime.utcnow)
     is_restored = Column(Boolean, default=False)
+    pending_restore = Column(Boolean, default=False)
 
 
 class Screenshot(Base):

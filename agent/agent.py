@@ -84,10 +84,10 @@ logger.info(f"=== EDR Agent запускается. AGENT_ID={AGENT_ID} SERVER={
 # ── Вспомогательные ───────────────────────────────────────────────────────────
 
 def _pii_severity(pii_types: list, confidence: float) -> str:
-    """HIGH если найден ИИН/карта/документ; иначе MEDIUM/LOW по уверенности."""
+    """HIGH если ИИН/карта/документ; MEDIUM если любой другой тип ПД."""
     if any(t in HIGH_PII_TYPES for t in pii_types):
         return "HIGH"
-    return "MEDIUM" if confidence > 0.50 else "LOW"
+    return "MEDIUM" if pii_types else "LOW"
 
 # ── Одиночный экземпляр (lock-файл) ──────────────────────────────────────────
 
@@ -342,12 +342,7 @@ class Agent:
                                 "blocked": False,
                             },
                         )
-                        ok, qpath = quarantine_file(path)
-                        if ok and qpath:
-                            logger.info(f"Quarantined on scan: {path}")
-                            self._notify_quarantine(path, qpath, pii_types, confidence)
-                        else:
-                            logger.warning(f"Could not quarantine: {path}")
+                        logger.info(f"ПД найдены, ждём команды с дашборда: {fname}")
                 except Exception as e:
                     logger.debug(f"Сканирование {path}: {e}")
 
@@ -476,7 +471,7 @@ class Agent:
             paths=WATCH_PATHS,
             scanner=self.scanner,
             callback=self._on_watcher_event,
-            quarantine_on_detect=True,
+            quarantine_on_detect=False,
         )
         # Pre-populate with files found during initial_scan
         for p in self.pii_files:
@@ -529,6 +524,39 @@ class Agent:
         except Exception as e:
             logger.error(f"monitor_clipboard завершился с ошибкой: {e}", exc_info=True)
 
+    # ── Polling команд карантина от сервера ───────────────────────────────────
+
+    def _poll_quarantine_commands(self):
+        """Каждые 5 сек спрашивает сервер: есть ли файлы для карантина?"""
+        while self.running:
+            try:
+                r = requests.get(
+                    f"{SERVER_BASE}/pd-files/pending-quarantine",
+                    params={"agent_id": AGENT_ID},
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    for item in r.json():
+                        fid  = item["id"]
+                        path = item["file_path"]
+                        if os.path.isfile(path) and not is_quarantine_stub(path):
+                            ok, qpath = quarantine_file(path)
+                            if ok and qpath:
+                                self._notify_quarantine(path, qpath, [], 0.0)
+                        else:
+                            ok, qpath = False, ""
+                        try:
+                            requests.post(
+                                f"{SERVER_BASE}/pd-files/{fid}/quarantine-done",
+                                json={"quarantine_path": qpath, "success": ok},
+                                timeout=5,
+                            )
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(f"poll_quarantine_commands: {e}")
+            time.sleep(5)
+
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self):
@@ -552,6 +580,7 @@ class Agent:
             threading.Thread(target=self._flush_buffer, daemon=True),
             threading.Thread(target=self._heartbeat, daemon=True),
             threading.Thread(target=self._monitor_clipboard, daemon=True),
+            threading.Thread(target=self._poll_quarantine_commands, daemon=True),
         ]
         for t in threads:
             t.start()

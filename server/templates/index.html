@@ -148,6 +148,11 @@
         </a>
       </li>
       <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabPdFiles" onclick="loadPdFiles()">
+          <i class="bi bi-file-earmark-person-fill me-1 text-warning"></i>ПД-Файлы
+        </a>
+      </li>
+      <li class="nav-item">
         <a class="nav-link" data-bs-toggle="tab" href="#tabQuarantine" onclick="loadQuarantine()">
           <i class="bi bi-folder-x-fill me-1 text-warning"></i>Карантин
         </a>
@@ -297,6 +302,34 @@
               <div class="fw-semibold mb-2">Топ-5 агентов</div>
               <canvas id="chartAgents" height="120"></canvas>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab: PD-Files ────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabPdFiles">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+              <i class="bi bi-file-earmark-person-fill text-warning me-1"></i>
+              Файлы с персональными данными
+            </span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadPdFiles()">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr>
+                  <th>Файл</th><th>Типы ПД</th><th>Уровень</th>
+                  <th>Агент</th><th>Дата</th><th>Статус</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="pdFilesBody">
+                <tr><td colspan="7" class="text-center text-muted py-3">Загрузка...</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -580,6 +613,63 @@ async function loadPrivileges() {
 async function loadPiiCount() {
   const data = await apiFetch('/quarantine/count');
   if (data) document.getElementById('statPii').textContent = data.count;
+}
+
+async function loadPdFiles() {
+  const data = await apiFetch('/pd-files');
+  const tbody = document.getElementById('pdFilesBody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Нет файлов с ПД</td></tr>';
+    return;
+  }
+  const piiColors = {IIN:'danger',CARD:'danger',DOC_NUM:'danger',PHONE:'warning',EMAIL:'info',FIO:'primary',DOB:'secondary'};
+  tbody.innerHTML = data.map(f => {
+    const types = (f.pii_types||'').split(',').filter(Boolean);
+    const badges = types.map(t => `<span class="badge bg-${piiColors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+    const hasHigh = ['IIN','CARD','DOC_NUM'].some(h => types.includes(h));
+    const sev = hasHigh
+      ? '<span class="badge bg-danger">HIGH</span>'
+      : types.length ? '<span class="badge bg-warning text-dark">MEDIUM</span>'
+      : '<span class="badge bg-secondary">LOW</span>';
+    const conf = (f.confidence*100).toFixed(0)+'%';
+    const dt   = f.detected_at ? f.detected_at.substring(0,16).replace('T',' ') : '—';
+    let status, btn;
+    if (f.is_blocked) {
+      status = '<span class="badge bg-secondary">В карантине</span>';
+      btn = '';
+    } else if (f.pending_quarantine) {
+      status = '<span class="badge bg-warning text-dark">Ожидает...</span>';
+      btn = '<button class="btn btn-sm btn-outline-secondary" disabled>Ожидает</button>';
+    } else {
+      status = '<span class="badge bg-success">На компьютере</span>';
+      btn = `<button class="btn btn-sm btn-outline-danger" onclick="requestQuarantine(${f.id})">
+               <i class="bi bi-folder-x-fill me-1"></i>Карантин
+             </button>`;
+    }
+    return `<tr>
+      <td><span title="${escHtml(f.file_path)}">${escHtml(f.file_name||'—')}</span><br>
+          <small class="text-muted">${conf} уверенность</small></td>
+      <td>${badges||'—'}</td>
+      <td>${sev}</td>
+      <td>${escHtml(f.agent_id||'—')}</td>
+      <td>${dt}</td>
+      <td>${status}</td>
+      <td>${btn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function requestQuarantine(id) {
+  if (!confirm('Отправить файл в карантин? Файл будет удалён с компьютера и заблокирован.')) return;
+  const r = await fetch(`/pd-files/${id}/request-quarantine`, {
+    method: 'POST', headers: {'Authorization': 'Bearer ' + localStorage.getItem('edr_token')}
+  });
+  if (r.ok) {
+    showToast('Команда карантина отправлена агенту', 'warning');
+    setTimeout(loadPdFiles, 6000);
+  } else {
+    showToast('Ошибка: ' + (await r.text()), 'danger');
+  }
 }
 
 async function loadQuarantine() {

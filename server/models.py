@@ -53,6 +53,7 @@ class PDFile(Base):
     pii_types = Column(String(256), nullable=True)
     confidence = Column(Float, default=0.0)
     is_blocked = Column(Boolean, default=False)
+    pending_quarantine = Column(Boolean, default=False)
     detected_at = Column(DateTime, default=datetime.utcnow)
 
 

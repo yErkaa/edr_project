@@ -969,6 +969,108 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# ── PD-Files: список + карантин по команде ───────────────────────────────────
+
+class QuarantineDoneIn(BaseModel):
+    quarantine_path: str = ""
+    success: bool = False
+
+
+@app.get("/pd-files")
+async def list_pd_files(
+    agent_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(PDFile).order_by(desc(PDFile.detected_at))
+    if agent_id:
+        q = q.where(PDFile.agent_id == agent_id)
+    result = await db.execute(q)
+    files = result.scalars().all()
+    return [
+        {
+            "id": f.id,
+            "agent_id": f.agent_id,
+            "file_path": f.file_path,
+            "file_name": f.file_name,
+            "pii_types": f.pii_types,
+            "confidence": f.confidence,
+            "is_blocked": f.is_blocked,
+            "pending_quarantine": f.pending_quarantine,
+            "detected_at": str(f.detected_at),
+        }
+        for f in files
+    ]
+
+
+@app.post("/pd-files/{file_id}/request-quarantine")
+async def request_quarantine(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(PDFile).where(PDFile.id == file_id))
+    pd_file = result.scalar_one_or_none()
+    if not pd_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if pd_file.is_blocked:
+        return {"status": "already_quarantined"}
+    pd_file.pending_quarantine = True
+    await db.commit()
+    logger.info(f"Карантин запрошен: {pd_file.file_name} (агент {pd_file.agent_id})")
+    return {"status": "ok"}
+
+
+@app.get("/pd-files/pending-quarantine")
+async def pending_quarantine(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Агент спрашивает: есть ли файлы для карантина? Авторизация не нужна."""
+    result = await db.execute(
+        select(PDFile).where(
+            PDFile.agent_id == agent_id,
+            PDFile.pending_quarantine == True,  # noqa: E712
+            PDFile.is_blocked == False,          # noqa: E712
+        )
+    )
+    files = result.scalars().all()
+    return [{"id": f.id, "file_path": f.file_path} for f in files]
+
+
+@app.post("/pd-files/{file_id}/quarantine-done")
+async def quarantine_done(
+    file_id: int,
+    data: QuarantineDoneIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Агент сообщает что карантин выполнен."""
+    result = await db.execute(select(PDFile).where(PDFile.id == file_id))
+    pd_file = result.scalar_one_or_none()
+    if not pd_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    pd_file.pending_quarantine = False
+    if data.success:
+        pd_file.is_blocked = True
+        qf = QuarantineFile(
+            agent_id=pd_file.agent_id,
+            original_path=pd_file.file_path,
+            quarantine_path=data.quarantine_path,
+            filename=pd_file.file_name,
+            pii_types=pd_file.pii_types,
+            confidence=pd_file.confidence,
+        )
+        db.add(qf)
+        logger.info(f"Файл в карантине: {pd_file.file_name}")
+
+    await db.commit()
+    if data.success:
+        cnt = await db.execute(select(func.count()).select_from(QuarantineFile))
+        await manager.broadcast({"type": "quarantine_update", "count": cnt.scalar() or 0})
+    return {"status": "ok"}
+
+
 # ── Dashboard / Health ────────────────────────────────────────────────────────
 
 @app.get("/health")

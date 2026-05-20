@@ -26,7 +26,7 @@ from pii_scanner import HIGH_PII_TYPES as _HIGH_PII_TYPES
 def _pii_sev(pii_types: list, confidence: float) -> str:
     if any(t in _HIGH_PII_TYPES for t in pii_types):
         return "HIGH"
-    return "MEDIUM" if confidence > 0.50 else "LOW"
+    return "MEDIUM" if pii_types else "LOW"
 
 import win32con
 import win32file

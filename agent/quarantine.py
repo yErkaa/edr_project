@@ -20,6 +20,14 @@ import time
 from datetime import datetime
 from typing import Callable
 
+from pii_scanner import HIGH_PII_TYPES as _HIGH_PII_TYPES
+
+
+def _pii_sev(pii_types: list, confidence: float) -> str:
+    if any(t in _HIGH_PII_TYPES for t in pii_types):
+        return "HIGH"
+    return "MEDIUM" if confidence > 0.50 else "LOW"
+
 import win32con
 import win32file
 
@@ -340,9 +348,29 @@ class DirectoryWatcher:
 
     # ── Handlers ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _wait_ready(path: str, max_wait: float = 5.0) -> bool:
+        """Wait until file size stops changing (write complete). Returns False if file vanishes."""
+        step, prev, stable = 0.3, -1, 0
+        elapsed = 0.0
+        while elapsed < max_wait:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                return False
+            if size > 0 and size == prev:
+                stable += 1
+                if stable >= 2:   # stable for 2 consecutive checks (~0.6 s)
+                    return True
+            else:
+                stable = 0
+            prev = size
+            time.sleep(step)
+            elapsed += step
+        return os.path.isfile(path)
+
     def _on_created(self, path: str):
-        time.sleep(0.5)
-        if not os.path.isfile(path):
+        if not self._wait_ready(path):
             return
         if is_quarantine_stub(path):
             return  # our own stub
@@ -387,7 +415,7 @@ class DirectoryWatcher:
             self._pii_files.add(path)
 
         extra = {"confidence": confidence, "pii_types": ",".join(pii_types)}
-        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+        severity = _pii_sev(pii_types, confidence)
         self.callback(path, "pii_detected", severity, extra)
 
         if self.quarantine_on_detect:
@@ -434,7 +462,7 @@ class DirectoryWatcher:
             with self._lock:
                 self._pii_files.add(path)
             extra    = {"confidence": confidence, "pii_types": ",".join(pii_types)}
-            severity = "MEDIUM" if confidence > 0.50 else "LOW"
+            severity = _pii_sev(pii_types, confidence)
         else:
             extra    = {}
             severity = "MEDIUM"
@@ -498,7 +526,7 @@ class DirectoryWatcher:
         with self._lock:
             self._pii_files.add(dest)
 
-        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+        severity = _pii_sev(pii_types, confidence)
         extra = {"confidence": confidence, "pii_types": ",".join(pii_types), "from": src}
         self.callback(dest, "file_moved", severity, extra)
 

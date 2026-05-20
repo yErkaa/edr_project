@@ -3,7 +3,19 @@ import re
 
 # ── Regex patterns ────────────────────────────────────────────────────────────
 
+# HIGH-level PII ──────────────────────────────────────────────────────────────
+
 _IIN_RE = re.compile(r"(?<!\d)(\d{12})(?!\d)")
+
+# Bank card: 16 digits in groups of 4, optionally separated by space/dash
+_CARD_RE = re.compile(r"\b(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})\b")
+
+# Kazakhstan passport number: 2 Latin letters + 7 digits (e.g. AB1234567)
+# Kazakhstan old ID card number: N + 8 digits (e.g. N12345678)
+_PASSPORT_RE = re.compile(r"\b[A-Z]{2}\d{7}\b")
+_IDCARD_RE   = re.compile(r"\bN\d{8}\b", re.IGNORECASE)
+
+# MEDIUM-level PII ────────────────────────────────────────────────────────────
 
 _PHONE_RE = re.compile(
     r"(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}"
@@ -23,6 +35,9 @@ _FIO_KZ_SUFFIX_RE = re.compile(
     r"\b[А-ЯЁ][а-яёА-ЯЁ]+\s+[А-ЯЁ][а-яёА-ЯЁ]+(?:улы|қызы|ұлы|қызы)\b"
 )
 
+# HIGH-level type names (used to compute severity in agent.py)
+HIGH_PII_TYPES = {"IIN", "CARD", "DOC_NUM"}
+
 # Plain-text extensions scanned directly
 _TEXT_EXTS = {".txt", ".csv", ".log", ".json", ".xml", ".tsv", ".md"}
 
@@ -32,7 +47,22 @@ _OFFICE_EXTS = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf"}
 _SUPPORTED_EXTS = _TEXT_EXTS | _OFFICE_EXTS
 
 
-# ── IIN checksum validation ───────────────────────────────────────────────────
+# ── Checksum validation ───────────────────────────────────────────────────────
+
+def _luhn_check(digits: str) -> bool:
+    """Validate a card number string using the Luhn algorithm."""
+    d = [int(c) for c in digits if c.isdigit()]
+    if len(d) != 16:
+        return False
+    total = 0
+    for i, v in enumerate(reversed(d)):
+        if i % 2 == 1:
+            v *= 2
+            if v > 9:
+                v -= 9
+        total += v
+    return total % 10 == 0
+
 
 def _validate_iin(iin_str: str) -> bool:
     if len(iin_str) != 12 or not iin_str.isdigit():
@@ -152,13 +182,30 @@ def _extract_text(path: str, ext: str) -> str:
 
 class PIIScanner:
     def scan_text(self, text: str) -> tuple:
-        """Return (is_pii, confidence, pii_types)."""
+        """Return (is_pii, confidence, pii_types).
+
+        HIGH-level types: IIN, CARD, DOC_NUM
+        MEDIUM-level types: PHONE, EMAIL, FIO, DOB
+        """
         found_types: list = []
+
+        # ── HIGH-level PII ────────────────────────────────────────────────────
 
         for match in _IIN_RE.finditer(text):
             if _validate_iin(match.group(1)):
                 found_types.append("IIN")
                 break
+
+        for match in _CARD_RE.finditer(text):
+            digits = "".join(match.groups())
+            if _luhn_check(digits):
+                found_types.append("CARD")
+                break
+
+        if _PASSPORT_RE.search(text) or _IDCARD_RE.search(text):
+            found_types.append("DOC_NUM")
+
+        # ── MEDIUM-level PII ──────────────────────────────────────────────────
 
         if _PHONE_RE.search(text):
             found_types.append("PHONE")
@@ -178,7 +225,15 @@ class PIIScanner:
         if not found_types:
             return False, 0.0, []
 
-        weights    = {"IIN": 0.40, "PHONE": 0.20, "EMAIL": 0.15, "FIO": 0.15, "DOB": 0.10}
+        weights = {
+            "IIN":     0.50,
+            "CARD":    0.50,
+            "DOC_NUM": 0.40,
+            "PHONE":   0.20,
+            "EMAIL":   0.15,
+            "FIO":     0.15,
+            "DOB":     0.10,
+        }
         confidence = round(min(sum(weights.get(t, 0) for t in found_types), 1.0), 2)
         return True, confidence, found_types
 

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import requests
 import psutil
 
-from pii_scanner import PIIScanner
+from pii_scanner import PIIScanner, HIGH_PII_TYPES
 from process_monitor import scan_processes
 from response_handler import handle_high_event, monitor_clipboard
 from usb_monitor import USBMonitor
@@ -82,6 +82,12 @@ logger.info(f"=== EDR Agent запускается. AGENT_ID={AGENT_ID} SERVER={
 
 
 # ── Вспомогательные ───────────────────────────────────────────────────────────
+
+def _pii_severity(pii_types: list, confidence: float) -> str:
+    """HIGH если найден ИИН/карта/документ; иначе MEDIUM/LOW по уверенности."""
+    if any(t in HIGH_PII_TYPES for t in pii_types):
+        return "HIGH"
+    return "MEDIUM" if confidence > 0.50 else "LOW"
 
 # ── Одиночный экземпляр (lock-файл) ──────────────────────────────────────────
 
@@ -324,7 +330,7 @@ class Agent:
                     if is_pii and confidence >= 0.15:
                         found += 1
                         self.pii_files.add(path)
-                        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+                        severity = _pii_severity(pii_types, confidence)
                         self.send_event(
                             "pii_detected",
                             severity,

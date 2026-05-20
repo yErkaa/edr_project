@@ -1,10 +1,23 @@
-"""Мониторинг USB-накопителей."""
+"""Мониторинг USB-накопителей через Win32 GetDriveType."""
+import ctypes
 import os
 import time
 
-import psutil
+_DRIVE_REMOVABLE = 2   # GetDriveType → съёмный диск (флешка)
+_DEDUP_WINDOW    = 3   # секунды — не сообщать о том же диске повторно
 
-_DEDUP_WINDOW = 3  # секунды
+
+def _get_removable_drives() -> list[str]:
+    """Возвращает список съёмных дисков типа ['E:', 'F:', ...]."""
+    drives = []
+    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        if bitmask & 1:
+            drive = f"{letter}:\\"
+            if ctypes.windll.kernel32.GetDriveType(drive) == _DRIVE_REMOVABLE:
+                drives.append(os.path.normpath(drive))
+        bitmask >>= 1
+    return drives
 
 
 class USBMonitor:
@@ -12,28 +25,15 @@ class USBMonitor:
         self.known: set = set()
         self._last_inserted: dict = {}
 
-    def get_removable_drives(self) -> list:
-        drives = []
-        try:
-            for part in psutil.disk_partitions(all=False):
-                opts = (part.opts or "").lower()
-                # Windows: removable флаг ИЛИ тип диска cdrom исключаем
-                if "removable" in opts and "cdrom" not in opts:
-                    # Нормализуем путь (убираем лишние слеши, но оставляем корень)
-                    mp = part.mountpoint
-                    # На Windows "E:\" -> нормализуем как "E:"
-                    norm = os.path.normpath(mp)
-                    drives.append(norm)
-        except Exception:
-            pass
-        return drives
+    def get_removable_drives(self) -> list[str]:
+        return _get_removable_drives()
 
     def poll(self):
         current = set(self.get_removable_drives())
         now = time.time()
         raw_inserted = current - self.known
 
-        # Дедупликация: не сообщаем о диске повторно если он уже был недавно
+        # Дедупликация: не сообщать о диске повторно если он только что появился
         inserted = [
             d for d in raw_inserted
             if d not in self._last_inserted

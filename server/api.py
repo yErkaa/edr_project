@@ -550,7 +550,7 @@ async def list_quarantine(
             "id": f.id, "agent_id": f.agent_id,
             "original_path": f.original_path,
             "quarantine_path": f.quarantine_path,
-            "filename": f.filename, "pii_types": f.pii_types,
+            "file_name": f.filename, "pii_types": f.pii_types,
             "confidence": f.confidence,
             "timestamp": f.timestamp, "is_restored": f.is_restored,
         }
@@ -1099,7 +1099,9 @@ async def quarantine_done(
 
     await db.commit()
     if data.success:
-        cnt = await db.execute(select(func.count()).select_from(QuarantineFile))
+        cnt = await db.execute(
+            select(func.count()).select_from(QuarantineFile).where(QuarantineFile.is_restored == False)  # noqa: E712
+        )
         await manager.broadcast({"type": "quarantine_update", "count": cnt.scalar() or 0})
     return {"status": "ok"}
 

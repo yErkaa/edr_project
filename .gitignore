@@ -236,3 +236,8 @@ agent_stdout.txt
 
 # Claude Code
 .claude/
+
+# ML datasets and models (слишком
+  большие)
+server/ml_model/datasets/
+server/ml_model/*.pkl

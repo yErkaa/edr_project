@@ -667,6 +667,7 @@ async function requestQuarantine(id) {
   if (r.ok) {
     showToast('Команда карантина отправлена агенту', 'warning');
     setTimeout(loadPdFiles, 6000);
+    setTimeout(loadQuarantine, 10000);
   } else {
     showToast('Ошибка: ' + (await r.text()), 'danger');
   }
@@ -715,9 +716,9 @@ async function restoreFile(id, fname) {
     body: JSON.stringify({}),
   });
   if (r.ok) {
-    showToast('Файл восстановлен', 'success');
-    // Агент восстанавливает асинхронно — обновляем через 6 сек
-    setTimeout(async () => { await loadQuarantine(); await loadPdFiles(); await loadPiiCount(); }, 6000);
+    showToast('Команда восстановления отправлена агенту', 'success');
+    // Агент восстанавливает асинхронно — обновляем через 8 сек
+    setTimeout(async () => { await loadQuarantine(); await loadPdFiles(); await loadPiiCount(); }, 8000);
   } else {
     const err = await r.json().catch(()=>({}));
     alert('Ошибка: ' + (err.detail || 'не удалось восстановить'));

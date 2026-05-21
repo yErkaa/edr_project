@@ -77,6 +77,33 @@ def _validate_iin(iin_str: str) -> bool:
     return d[11] == s2
 
 
+# ── ML model (optional) ──────────────────────────────────────────────────────
+
+_ML_THRESHOLD = 0.70  # minimum P(PII) to trust ML when regex finds nothing
+
+try:
+    import joblib as _joblib
+    _ML_DIR        = os.path.join(os.path.dirname(__file__), "..", "server", "ml_model")
+    _ml_vectorizer = _joblib.load(os.path.join(_ML_DIR, "vectorizer.pkl"))
+    _ml_model      = _joblib.load(os.path.join(_ML_DIR, "pii_model.pkl"))
+    _ML_AVAILABLE  = True
+except Exception:
+    _ml_vectorizer = None
+    _ml_model      = None
+    _ML_AVAILABLE  = False
+
+
+def _ml_predict(text: str) -> float:
+    """Return P(has PII) from the ML model, or 0.0 if unavailable."""
+    if not _ML_AVAILABLE:
+        return 0.0
+    try:
+        X = _ml_vectorizer.transform([text[:10_000]])
+        return float(_ml_model.predict_proba(X)[0][1])
+    except Exception:
+        return 0.0
+
+
 # ── spaCy (optional) ──────────────────────────────────────────────────────────
 
 try:
@@ -274,6 +301,9 @@ class PIIScanner:
             found_types.append("FIO")
 
         if not found_types:
+            ml_prob = _ml_predict(text)
+            if ml_prob >= _ML_THRESHOLD:
+                return True, round(ml_prob, 2), ["ML_DETECTED"]
             return False, 0.0, []
 
         weights = {

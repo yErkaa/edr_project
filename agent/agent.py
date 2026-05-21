@@ -545,14 +545,8 @@ class Agent:
                 return
             for item in r.json():
                 fid, path = item["id"], item["file_path"]
-                # quarantine_file handles all cases:
-                # - file exists → moves to quarantine
-                # - stub exists (already quarantined) → returns (True, "")
-                # - file missing → returns (False, "")
                 ok, qpath = quarantine_file(path)
-                if ok and qpath:
-                    self._notify_quarantine(path, qpath, [], 0.0)
-                elif not ok and not os.path.isfile(path):
+                if not ok and not os.path.isfile(path):
                     # File doesn't exist at all — mark as done to stop retrying
                     ok = True
                     logger.warning(f"Файл для карантина не найден (уже перемещён?): {path}")

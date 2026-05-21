@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 
 BASE_DIR        = os.path.dirname(__file__)
 SYNTH_PATH      = os.path.join(BASE_DIR, "datasets", "synthetic_kz_students.csv")
+SYNTH_V2_PATH   = os.path.join(BASE_DIR, "datasets", "synthetic_kz_v2.csv")
 KAGGLE_JSON     = os.path.join(BASE_DIR, "datasets", "train.json")
 KAGGLE_CSV      = os.path.join(BASE_DIR, "datasets", "pii_detection_train.csv")
 MODEL_PATH      = os.path.join(BASE_DIR, "pii_model.pkl")
@@ -36,7 +37,18 @@ def load_synthetic() -> pd.DataFrame:
             "Сначала запустите: python generate_dataset.py"
         )
     df = pd.read_csv(SYNTH_PATH)
-    print(f"[INFO] Синтетический датасет: {len(df)} записей")
+    print(f"[INFO] Датасет v1 (базовый): {len(df)} записей")
+
+    # Подгружаем v2 (сложные случаи) если он сгенерирован
+    if os.path.exists(SYNTH_V2_PATH):
+        df2 = pd.read_csv(SYNTH_V2_PATH)
+        print(f"[INFO] Датасет v2 (сложные случаи): {len(df2)} записей")
+        df = pd.concat([df, df2], ignore_index=True)
+        print(f"[INFO] Итого синтетических: {len(df)} записей")
+    else:
+        print("[INFO] Датасет v2 не найден, пропускаем. "
+              "Запустите: python generate_dataset_v2.py")
+
     return df[["text", "label"]].dropna()
 
 

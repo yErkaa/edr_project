@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 :: Проверяем права администратора — если нет, перезапускаемся с ними
 net session >nul 2>&1
 if %errorLevel% neq 0 (

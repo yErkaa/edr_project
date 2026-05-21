@@ -84,10 +84,12 @@ logger.info(f"=== EDR Agent запускается. AGENT_ID={AGENT_ID} SERVER={
 # ── Вспомогательные ───────────────────────────────────────────────────────────
 
 def _pii_severity(pii_types: list, confidence: float) -> str:
-    """HIGH если ИИН/карта/документ; MEDIUM если любой другой тип ПД."""
-    if any(t in HIGH_PII_TYPES for t in pii_types):
+    unique = set(pii_types)
+    if unique & HIGH_PII_TYPES:   # IIN / CARD / DOC_NUM → HIGH
         return "HIGH"
-    return "MEDIUM" if pii_types else "LOW"
+    if len(unique) >= 2:           # 2+ мягких типа → MEDIUM
+        return "MEDIUM"
+    return "LOW"                   # один мягкий тип → LOW
 
 # ── Одиночный экземпляр (lock-файл) ──────────────────────────────────────────
 

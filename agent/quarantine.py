@@ -24,9 +24,12 @@ from pii_scanner import HIGH_PII_TYPES as _HIGH_PII_TYPES
 
 
 def _pii_sev(pii_types: list, confidence: float) -> str:
-    if any(t in _HIGH_PII_TYPES for t in pii_types):
+    unique = set(pii_types)
+    if unique & _HIGH_PII_TYPES:          # IIN / CARD / DOC_NUM → всегда HIGH
         return "HIGH"
-    return "MEDIUM" if pii_types else "LOW"
+    if len(unique) >= 2:                   # 2+ мягких типа (телефон+ФИО, почта+ФИО...) → MEDIUM
+        return "MEDIUM"
+    return "LOW"                           # один мягкий тип или ничего → LOW
 
 import win32con
 import win32file
@@ -408,6 +411,10 @@ class DirectoryWatcher:
 
         if usb_root and cb:
             logger.warning(f"PII on USB: {path}")
+            # Добавляем в _quarantining до вызова cb, чтобы последующее DELETE-событие
+            # (от os.remove внутри on_usb_pii_event) не порождало file_deleted_with_pii.
+            with self._lock:
+                self._quarantining.add(path)
             cb(path)
             return
 
@@ -459,13 +466,31 @@ class DirectoryWatcher:
                 return
             if not is_pii or confidence < 0.15:
                 return
-            with self._lock:
-                self._pii_files.add(path)
             extra    = {"confidence": confidence, "pii_types": ",".join(pii_types)}
             severity = _pii_sev(pii_types, confidence)
         else:
             extra    = {}
             severity = "MEDIUM"
+
+        # USB-проверка: если файл на флешке — передать USB-callback вместо file_modified.
+        # Так же добавляем в _quarantining, чтобы последующее DELETE не стало false-alarm.
+        path_lower = path.lower()
+        with self._lock:
+            usb_root = next(
+                (u for u in self._usb_paths if path_lower.startswith(u.lower())), None
+            )
+            cb = self._usb_callback if usb_root else None
+            already_handled = path in self._quarantining
+
+        if usb_root and cb and not already_handled:
+            with self._lock:
+                self._quarantining.add(path)
+            cb(path)
+            return
+
+        if not known:
+            with self._lock:
+                self._pii_files.add(path)
 
         self.callback(path, "file_modified", severity, extra)
 

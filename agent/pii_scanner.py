@@ -97,6 +97,45 @@ def _extract_spacy_persons(text: str) -> list:
 
 # ── Office text extraction ────────────────────────────────────────────────────
 
+def _extract_pdf_ocr(path: str) -> str:
+    """OCR для PDF-сканов (фото удостоверений и т.п.).
+    Требует: pip install PyMuPDF pytesseract Pillow
+             + установленный Tesseract OCR с русским языковым пакетом.
+    Если библиотеки не установлены — молча возвращает пустую строку.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return ""
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+
+    parts = []
+    try:
+        doc = fitz.open(path)
+        for i in range(min(len(doc), 10)):   # OCR максимум 10 страниц
+            page = doc[i]
+            mat  = fitz.Matrix(2.0, 2.0)     # 200 DPI — лучше для OCR
+            pix  = page.get_pixmap(matrix=mat)
+            img  = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Пробуем русский + казахский, затем только русский, затем английский
+            for lang in ("rus+kaz", "rus", "eng"):
+                try:
+                    text = pytesseract.image_to_string(img, lang=lang, timeout=30)
+                    if text.strip():
+                        parts.append(text)
+                        break
+                except Exception:
+                    continue
+        doc.close()
+    except Exception:
+        pass
+    return "\n".join(parts)
+
+
 def _cell_str(value) -> str:
     """Convert a spreadsheet cell to string, preserving integer IINs."""
     if isinstance(value, float) and value == int(value):
@@ -156,16 +195,28 @@ def _extract_text(path: str, ext: str) -> str:
             return "\n".join(parts)
 
         if ext == ".pdf":
-            import pdfplumber
-            parts = []
-            with pdfplumber.open(path) as pdf:
-                for page in pdf.pages[:30]:   # limit to first 30 pages
-                    t = page.extract_text()
-                    if t:
-                        parts.append(t)
-                        if len("\n".join(parts)) > 500_000:
-                            break
-            return "\n".join(parts)
+            # Шаг 1: извлечь текстовый слой (текстовые PDF)
+            text_parts = []
+            try:
+                import pdfplumber
+                with pdfplumber.open(path) as pdf:
+                    for page in pdf.pages[:30]:
+                        t = page.extract_text()
+                        if t:
+                            text_parts.append(t)
+                            if len("\n".join(text_parts)) > 500_000:
+                                break
+            except Exception:
+                pass
+            text = "\n".join(text_parts)
+
+            # Шаг 2: если текста мало (скан/фото) — OCR через PyMuPDF + pytesseract
+            if len(text.strip()) < 100:
+                ocr = _extract_pdf_ocr(path)
+                if ocr:
+                    text = ocr
+
+            return text
 
     except Exception:
         pass

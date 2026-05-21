@@ -140,6 +140,17 @@ def restore_file(quarantine_path: str, original_path: str) -> bool:
 
         os.makedirs(os.path.dirname(os.path.abspath(original_path)), exist_ok=True)
         shutil.move(quarantine_path, original_path)
+
+        # Reset ACL — quarantine dir has DENY EVERYONE, file may inherit those rights
+        try:
+            import subprocess
+            subprocess.run(
+                ["icacls", original_path, "/reset"],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+
         logger.info(f"Restored: {quarantine_path} → {original_path}")
         return True
     except Exception as e:

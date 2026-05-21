@@ -3,499 +3,810 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>EDR — Защита ПД учеников</title>
+  <title>EDR — Endpoint Detection and Response</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
   <style>
-    body { background: #f0f2f5; }
-    .navbar-brand span { font-weight: 700; letter-spacing: .5px; }
-    .stat-card { border-left: 4px solid; }
-    .stat-card.high   { border-color: #dc3545; }
-    .stat-card.medium { border-color: #ffc107; }
-    .stat-card.agents { border-color: #0d6efd; }
-    .stat-card.pii    { border-color: #198754; }
-    .stat-value { font-size: 2rem; font-weight: 700; }
-    .badge-HIGH   { background:#f8d7da; color:#842029; border:1px solid #f5c2c7; }
-    .badge-MEDIUM { background:#fff3cd; color:#664d03; border:1px solid #ffecb5; }
-    .badge-LOW    { background:#d1e7dd; color:#0a3622; border:1px solid #badbcc; }
-    .badge-sev { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
-    .ws-dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:5px; }
-    .ws-on  { background:#198754; }
-    .ws-off { background:#dc3545; }
-    .agent-card .online-badge  { background:#d1e7dd; color:#0a3622; }
-    .agent-card .offline-badge { background:#f8d7da; color:#842029; }
-    #loginScreen { min-height:100vh; display:flex; align-items:center; justify-content:center; }
-    #app { display:none; }
-    .table th { color:#6c757d; font-size:.78rem; text-transform:uppercase; }
-    .table td { font-size:.88rem; vertical-align:middle; }
-    .alert-row-HIGH { background:#fff5f5; }
-    .clickable-row { cursor:pointer; }
-    .clickable-row:hover { background:#f8f9fa !important; }
-    .detail-label { font-weight:600; color:#6c757d; font-size:.78rem; text-transform:uppercase; min-width:120px; }
-    .detail-value { font-size:.9rem; word-break:break-all; }
-    .detail-row { display:flex; gap:12px; padding:6px 0; border-bottom:1px solid #f0f0f0; }
-    .detail-row:last-child { border-bottom:none; }
-    .modal-header-HIGH   { background:#fff5f5; border-bottom:2px solid #dc3545; }
-    .modal-header-MEDIUM { background:#fffdf0; border-bottom:2px solid #ffc107; }
-    .modal-header-LOW    { background:#f0fff4; border-bottom:2px solid #198754; }
-    .usb-block-badge { background:#dc3545; color:#fff; padding:3px 10px; border-radius:20px; font-size:.78rem; }
-    .usb-allow-badge { background:#198754; color:#fff; padding:3px 10px; border-radius:20px; font-size:.78rem; }
-    .chart-card { background:#fff; border-radius:8px; padding:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
-    .prot-badge { background:#6610f2; color:#fff; padding:3px 10px; border-radius:20px; font-size:.75rem; }
-    .nav-tabs .nav-link { font-size:.88rem; }
+    :root {
+      --bg-main:    #0b0c1e;
+      --bg-sidebar: #0d0e22;
+      --bg-card:    #12132a;
+      --bg-card2:   #181933;
+      --border:     rgba(255,255,255,.07);
+      --accent:     #e91e8c;
+      --accent2:    #7c3aed;
+      --accent3:    #2563eb;
+      --accent-am:  #f59e0b;
+      --text-main:  #e2e4f0;
+      --text-muted: #6b7099;
+      --text-dim:   #3e4166;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { background: var(--bg-main); color: var(--text-main); overflow: hidden; }
+
+    /* ── Login ─────────────────────────────────────────────────────── */
+    #loginScreen {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at 30% 40%, rgba(124,58,237,.18) 0%, transparent 60%),
+                  radial-gradient(ellipse at 70% 70%, rgba(233,30,140,.12) 0%, transparent 60%),
+                  var(--bg-main);
+    }
+    .login-card {
+      background: var(--bg-card2); border: 1px solid var(--border);
+      border-radius: 16px; padding: 36px; width: 360px;
+      box-shadow: 0 0 60px rgba(124,58,237,.15);
+    }
+    .login-card .login-logo {
+      font-size: 2rem; margin-bottom: 4px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .login-card h5 { color: var(--text-main); font-weight: 700; margin-bottom: 4px; }
+    .login-card p  { color: var(--text-muted); font-size: .85rem; margin-bottom: 20px; }
+    .login-card .form-label { color: var(--text-muted); font-size: .8rem; margin-bottom: 4px; }
+    .login-card .form-control {
+      background: var(--bg-main); border: 1px solid var(--border);
+      color: var(--text-main); border-radius: 8px;
+    }
+    .login-card .form-control:focus {
+      background: var(--bg-main); color: var(--text-main);
+      border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(124,58,237,.25);
+    }
+    .login-card .btn-login {
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border: none; border-radius: 8px; color: #fff;
+      font-weight: 600; padding: 10px; width: 100%; margin-top: 8px;
+      transition: opacity .2s;
+    }
+    .login-card .btn-login:hover { opacity: .88; }
+    #loginError { background: rgba(220,53,69,.15); border: 1px solid rgba(220,53,69,.35);
+      color: #f87171; border-radius: 8px; padding: 8px 12px; font-size: .85rem; }
+
+    /* ── App shell ─────────────────────────────────────────────────── */
+    #app { display: none; height: 100vh; }
+    .app-layout { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ───────────────────────────────────────────────────── */
+    .sidebar {
+      width: 220px; min-width: 220px; background: var(--bg-sidebar);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+      padding: 0; overflow: hidden;
+    }
+    .sidebar-logo {
+      padding: 22px 20px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-logo .logo-icon {
+      font-size: 1.4rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .sidebar-logo .logo-title {
+      font-size: .72rem; font-weight: 700; letter-spacing: .08em;
+      color: var(--text-muted); text-transform: uppercase; margin-top: 2px;
+    }
+    .sidebar-logo .logo-sub {
+      font-size: .65rem; color: var(--text-dim); margin-top: 1px;
+    }
+
+    .sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+    .sidebar-nav .nav-section {
+      font-size: .6rem; font-weight: 700; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--text-dim);
+      padding: 8px 18px 4px;
+    }
+    .sidebar-nav .nav-item { padding: 2px 10px; }
+    .sidebar-nav .nav-link {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border-radius: 8px;
+      color: var(--text-muted); font-size: .82rem; font-weight: 500;
+      text-decoration: none; transition: all .15s; cursor: pointer; border: none; background: none; width: 100%;
+    }
+    .sidebar-nav .nav-link i { font-size: 1rem; min-width: 18px; }
+    .sidebar-nav .nav-link:hover { color: var(--text-main); background: rgba(255,255,255,.05); }
+    .sidebar-nav .nav-link.active {
+      color: #fff;
+      background: linear-gradient(90deg, rgba(233,30,140,.18), rgba(124,58,237,.12));
+      border-left: 2px solid var(--accent);
+      margin-left: -2px;
+    }
+    .sidebar-nav .nav-link .nav-badge {
+      margin-left: auto; font-size: .65rem; font-weight: 700;
+      background: var(--accent); color: #fff;
+      padding: 2px 6px; border-radius: 10px; min-width: 18px; text-align: center;
+    }
+
+    .sidebar-footer {
+      padding: 14px 14px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .sidebar-status {
+      background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.2);
+      border-radius: 10px; padding: 10px 12px;
+    }
+    .sidebar-status .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #10b981; box-shadow: 0 0 6px #10b981; display: inline-block;
+    }
+    .sidebar-status .status-text { font-size: .72rem; color: #10b981; font-weight: 600; margin-left: 6px; }
+    .sidebar-status .status-sub { font-size: .65rem; color: var(--text-muted); margin-top: 3px; }
+
+    /* ── Main content ──────────────────────────────────────────────── */
+    .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .topbar {
+      background: var(--bg-sidebar); border-bottom: 1px solid var(--border);
+      padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    .topbar-title { font-size: .95rem; font-weight: 700; color: var(--text-main); flex: 1; }
+    .topbar-title span { color: var(--text-muted); font-weight: 400; font-size: .82rem; margin-left: 8px; }
+    .ws-dot  { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    .ws-on   { background: #10b981; box-shadow: 0 0 5px #10b981; }
+    .ws-off  { background: #f43f5e; }
+    #wsStatus { font-size: .78rem; color: var(--text-muted); }
+    .user-badge {
+      background: rgba(124,58,237,.2); border: 1px solid rgba(124,58,237,.3);
+      color: #a78bfa; font-size: .78rem; padding: 4px 12px; border-radius: 20px; font-weight: 600;
+    }
+    .btn-logout {
+      background: rgba(255,255,255,.05); border: 1px solid var(--border);
+      color: var(--text-muted); padding: 6px 12px; border-radius: 8px; font-size: .8rem; cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-logout:hover { color: var(--text-main); background: rgba(255,255,255,.09); }
+
+    .content-scroll { flex: 1; overflow-y: auto; padding: 24px; }
+    .content-scroll::-webkit-scrollbar { width: 5px; }
+    .content-scroll::-webkit-scrollbar-track { background: transparent; }
+    .content-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Stat cards ────────────────────────────────────────────────── */
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card {
+      border-radius: 14px; padding: 20px 20px 16px;
+      border: 1px solid var(--border); position: relative; overflow: hidden;
+    }
+    .stat-card::before {
+      content: ''; position: absolute; inset: 0; opacity: .06;
+      background: var(--card-color, var(--accent));
+      pointer-events: none;
+    }
+    .stat-card-high   { --card-color: #f43f5e; border-color: rgba(244,63,94,.22); }
+    .stat-card-events { --card-color: #7c3aed; border-color: rgba(124,58,237,.22); }
+    .stat-card-agents { --card-color: #2563eb; border-color: rgba(37,99,235,.22); }
+    .stat-card-pii    { --card-color: #f59e0b; border-color: rgba(245,158,11,.22); }
+    .stat-icon {
+      font-size: 1.5rem; margin-bottom: 12px; display: block;
+      background: linear-gradient(135deg, var(--card-color, var(--accent)), rgba(255,255,255,.6));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stat-value { font-size: 2.2rem; font-weight: 800; line-height: 1; color: #fff; }
+    .stat-label { font-size: .75rem; color: var(--text-muted); margin-top: 5px; text-transform: uppercase; letter-spacing: .05em; }
+    .stat-card-high   .stat-value { color: #f87171; }
+    .stat-card-events .stat-value { color: #a78bfa; }
+    .stat-card-agents .stat-value { color: #60a5fa; }
+    .stat-card-pii    .stat-value { color: #fbbf24; }
+
+    /* ── Dark card ─────────────────────────────────────────────────── */
+    .dark-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .dark-card-header {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .85rem; font-weight: 600; color: var(--text-main);
+    }
+    .dark-card-header .header-right { display: flex; gap: 8px; align-items: center; }
+    .dark-card-body { padding: 0; }
+    .dark-card-body.padded { padding: 18px; }
+
+    /* ── Dark table ────────────────────────────────────────────────── */
+    .dark-table { width: 100%; border-collapse: collapse; }
+    .dark-table thead th {
+      padding: 10px 14px; font-size: .68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim);
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    .dark-table tbody td {
+      padding: 11px 14px; font-size: .83rem; color: var(--text-main);
+      border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle;
+    }
+    .dark-table tbody tr:last-child td { border-bottom: none; }
+    .dark-table tbody tr.clickable-row { cursor: pointer; transition: background .1s; }
+    .dark-table tbody tr.clickable-row:hover { background: rgba(255,255,255,.04); }
+    .dark-table tbody tr.alert-row-HIGH { background: rgba(244,63,94,.05); }
+    .dark-table tbody tr.alert-row-HIGH:hover { background: rgba(244,63,94,.09); }
+    .dark-table .text-truncate-cell { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dark-table code { color: #e879f9; background: rgba(232,121,249,.1); padding: 2px 6px; border-radius: 4px; font-size: .8rem; }
+
+    /* ── Severity badges ───────────────────────────────────────────── */
+    .badge-sev { display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 20px; font-size: .7rem; font-weight: 700; letter-spacing: .03em; }
+    .badge-HIGH   { background: linear-gradient(90deg,rgba(244,63,94,.25),rgba(244,63,94,.1)); color:#f87171; border:1px solid rgba(244,63,94,.3); }
+    .badge-MEDIUM { background: rgba(245,158,11,.15); color: #fbbf24; border: 1px solid rgba(245,158,11,.3); }
+    .badge-LOW    { background: rgba(107,114,128,.12); color: #9ca3af; border: 1px solid rgba(107,114,128,.25); }
+
+    /* ── Dark buttons ──────────────────────────────────────────────── */
+    .btn-dark-outline {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-muted); border-radius: 7px; padding: 5px 12px;
+      font-size: .78rem; cursor: pointer; transition: all .15s;
+    }
+    .btn-dark-outline:hover { color: var(--text-main); border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.05); }
+    .btn-accent {
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border: none; color: #fff; border-radius: 7px; padding: 5px 14px;
+      font-size: .78rem; cursor: pointer; font-weight: 600; transition: opacity .15s;
+    }
+    .btn-accent:hover { opacity: .85; }
+    .btn-success-dark {
+      background: rgba(16,185,129,.15); border: 1px solid rgba(16,185,129,.3);
+      color: #34d399; border-radius: 7px; padding: 4px 10px; font-size: .75rem; cursor: pointer;
+    }
+    .btn-success-dark:hover { background: rgba(16,185,129,.25); }
+    .btn-danger-dark {
+      background: rgba(244,63,94,.1); border: 1px solid rgba(244,63,94,.25);
+      color: #f87171; border-radius: 7px; padding: 4px 10px; font-size: .75rem; cursor: pointer;
+    }
+    .btn-danger-dark:hover { background: rgba(244,63,94,.2); }
+
+    /* ── Filter group ──────────────────────────────────────────────── */
+    .filter-group { display: flex; gap: 4px; }
+    .filter-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-muted); border-radius: 6px; padding: 4px 12px;
+      font-size: .75rem; cursor: pointer; transition: all .15s; font-weight: 600;
+    }
+    .filter-btn:hover { border-color: rgba(255,255,255,.2); color: var(--text-main); }
+    .filter-btn.active-all    { background: rgba(107,114,128,.2); color: #e2e4f0; border-color: rgba(255,255,255,.2); }
+    .filter-btn.active-high   { background: rgba(244,63,94,.2); color: #f87171; border-color: rgba(244,63,94,.4); }
+    .filter-btn.active-med    { background: rgba(245,158,11,.15); color: #fbbf24; border-color: rgba(245,158,11,.35); }
+    .filter-btn.active-low    { background: rgba(107,114,128,.12); color: #9ca3af; border-color: rgba(107,114,128,.3); }
+
+    /* ── Select ────────────────────────────────────────────────────── */
+    .dark-select {
+      background: var(--bg-main); border: 1px solid var(--border);
+      color: var(--text-main); border-radius: 7px; padding: 5px 10px;
+      font-size: .78rem; cursor: pointer; outline: none;
+    }
+    .dark-select:focus { border-color: var(--accent2); }
+
+    /* ── PII badge colors ──────────────────────────────────────────── */
+    .pii-IIN     { background: rgba(244,63,94,.15);  color: #f87171; border: 1px solid rgba(244,63,94,.3);  }
+    .pii-CARD    { background: rgba(244,63,94,.15);  color: #f87171; border: 1px solid rgba(244,63,94,.3);  }
+    .pii-DOC_NUM { background: rgba(244,63,94,.15);  color: #f87171; border: 1px solid rgba(244,63,94,.3);  }
+    .pii-PHONE   { background: rgba(245,158,11,.15); color: #fbbf24; border: 1px solid rgba(245,158,11,.3); }
+    .pii-EMAIL   { background: rgba(37,99,235,.15);  color: #60a5fa; border: 1px solid rgba(37,99,235,.3);  }
+    .pii-FIO     { background: rgba(124,58,237,.15); color: #a78bfa; border: 1px solid rgba(124,58,237,.3); }
+    .pii-DOB     { background: rgba(16,185,129,.12); color: #34d399; border: 1px solid rgba(16,185,129,.3); }
+    .pii-tag { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: .68rem; font-weight: 700; margin: 1px; }
+
+    /* ── Agents grid ───────────────────────────────────────────────── */
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .agent-card {
+      background: var(--bg-card2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px; transition: border-color .15s;
+    }
+    .agent-card:hover { border-color: rgba(255,255,255,.14); }
+    .agent-card .a-hostname { font-weight: 700; font-size: .9rem; color: #e2e4f0; }
+    .agent-card .a-id { font-size: .72rem; color: #e879f9; font-family: monospace; background: rgba(232,121,249,.1); padding: 1px 6px; border-radius: 4px; }
+    .agent-card .a-info { font-size: .76rem; color: var(--text-muted); margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+    .online-pill  { background: rgba(16,185,129,.15); color: #34d399; border: 1px solid rgba(16,185,129,.3); padding: 2px 10px; border-radius: 20px; font-size: .7rem; font-weight: 700; }
+    .offline-pill { background: rgba(244,63,94,.12);  color: #f87171; border: 1px solid rgba(244,63,94,.25); padding: 2px 10px; border-radius: 20px; font-size: .7rem; font-weight: 700; }
+
+    /* ── Statistics summary cards ──────────────────────────────────── */
+    .stat-mini { text-align: center; }
+    .stat-mini .sm-val { font-size: 2.2rem; font-weight: 800; line-height: 1; }
+    .stat-mini .sm-label { font-size: .72rem; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .05em; }
+
+    /* ── Chart card ────────────────────────────────────────────────── */
+    .chart-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px;
+    }
+    .chart-card .chart-title { font-size: .82rem; font-weight: 600; color: var(--text-main); margin-bottom: 12px; }
+
+    /* ── Forms ─────────────────────────────────────────────────────── */
+    .dark-form-label { font-size: .75rem; color: var(--text-muted); margin-bottom: 4px; display: block; }
+    .dark-input, .dark-select-full {
+      background: var(--bg-main); border: 1px solid var(--border);
+      color: var(--text-main); border-radius: 8px; padding: 7px 12px;
+      font-size: .83rem; width: 100%; outline: none; transition: border-color .15s;
+    }
+    .dark-input:focus, .dark-select-full:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(124,58,237,.2); }
+    .dark-input::placeholder { color: var(--text-dim); }
+    .dark-switch { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; cursor: pointer; }
+    .dark-switch input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+    .dark-switch label { font-size: .83rem; color: var(--text-main); cursor: pointer; }
+    .form-msg { font-size: .78rem; margin-top: 8px; }
+
+    /* ── Detail modal ──────────────────────────────────────────────── */
+    .modal-content {
+      background: var(--bg-card2); border: 1px solid var(--border); color: var(--text-main); border-radius: 14px;
+    }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .modal-header .modal-title { font-size: .95rem; font-weight: 700; }
+    .modal-body { padding: 20px; }
+    .modal-footer { border-top: 1px solid var(--border); padding: 12px 20px; }
+    .btn-close { filter: invert(1) opacity(.6); }
+    .modal-header-HIGH   { border-left: 3px solid #f43f5e; }
+    .modal-header-MEDIUM { border-left: 3px solid #f59e0b; }
+    .modal-header-LOW    { border-left: 3px solid #6b7280; }
+    .detail-row { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { font-weight: 600; color: var(--text-dim); font-size: .72rem; text-transform: uppercase; min-width: 120px; }
+    .detail-value { font-size: .85rem; color: var(--text-main); word-break: break-all; }
+    .detail-box { background: var(--bg-main); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+
+    /* ── Toast ─────────────────────────────────────────────────────── */
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+    .toast-item {
+      background: var(--bg-card2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px; min-width: 280px;
+      font-size: .83rem; color: var(--text-main); box-shadow: 0 4px 24px rgba(0,0,0,.4);
+      animation: toastIn .25s ease;
+    }
+    .toast-item.t-success { border-color: rgba(16,185,129,.4); }
+    .toast-item.t-warning { border-color: rgba(245,158,11,.4); }
+    .toast-item.t-danger  { border-color: rgba(244,63,94,.4);  }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    /* ── HIGH alert banner ─────────────────────────────────────────── */
+    .high-alert-banner {
+      background: rgba(244,63,94,.12); border: 1px solid rgba(244,63,94,.3);
+      border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .high-alert-banner i { color: #f87171; font-size: 1.4rem; }
+
+    /* ── USB badges ────────────────────────────────────────────────── */
+    .usb-block-badge { background: rgba(244,63,94,.2); color: #f87171; border: 1px solid rgba(244,63,94,.3); padding: 2px 10px; border-radius: 20px; font-size: .72rem; font-weight: 700; }
+    .usb-allow-badge { background: rgba(16,185,129,.15); color: #34d399; border: 1px solid rgba(16,185,129,.3); padding: 2px 10px; border-radius: 20px; font-size: .72rem; font-weight: 700; }
+    .usb-info-box {
+      background: rgba(244,63,94,.07); border: 1px solid rgba(244,63,94,.2);
+      border-radius: 10px; padding: 12px 14px; margin-top: 12px;
+    }
+
+    /* ── Tab content ───────────────────────────────────────────────── */
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── Scrollbar ─────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Misc ──────────────────────────────────────────────────────── */
+    .section-header { font-size: .82rem; font-weight: 600; color: var(--text-main); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+    .prot-badge { background: rgba(124,58,237,.2); color: #a78bfa; border: 1px solid rgba(124,58,237,.3); padding: 2px 10px; border-radius: 20px; font-size: .72rem; font-weight: 700; }
+    .quarantine-badge { background: rgba(245,158,11,.15); color: #fbbf24; border: 1px solid rgba(245,158,11,.3); padding: 2px 8px; border-radius: 10px; font-size: .7rem; font-weight: 700; }
+    .restored-badge   { background: rgba(16,185,129,.12); color: #34d399; border: 1px solid rgba(16,185,129,.3); padding: 2px 8px; border-radius: 10px; font-size: .7rem; font-weight: 700; }
+    .waiting-badge    { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.25); padding: 2px 8px; border-radius: 10px; font-size: .7rem; }
+    .online-card-badge { background: rgba(37,99,235,.12); color: #60a5fa; border: 1px solid rgba(37,99,235,.25); padding: 2px 8px; border-radius: 10px; font-size: .7rem; }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { color: var(--accent); }
   </style>
 </head>
 <body>
 
-<!-- ── Login ──────────────────────────────────────────────────────────────────── -->
+<!-- ── Login ──────────────────────────────────────────────────────────────── -->
 <div id="loginScreen">
-  <div class="card shadow" style="width:360px">
-    <div class="card-body p-4">
-      <h5 class="mb-1 fw-bold"><i class="bi bi-shield-lock-fill text-primary me-2"></i>EDR School</h5>
-      <p class="text-muted small mb-3">Система защиты ПД учеников</p>
-      <div id="loginError" class="alert alert-danger d-none py-2"></div>
-      <div class="mb-3">
-        <label class="form-label small">Логин</label>
-        <input id="loginUser" type="text" class="form-control" value="admin"/>
-      </div>
-      <div class="mb-3">
-        <label class="form-label small">Пароль</label>
-        <input id="loginPass" type="password" class="form-control" value="admin123"
-               onkeydown="if(event.key==='Enter') doLogin()"/>
-      </div>
-      <button class="btn btn-primary w-100" onclick="doLogin()">Войти</button>
+  <div class="login-card">
+    <div class="login-logo"><i class="bi bi-shield-shaded"></i></div>
+    <h5>Endpoint Detection and Response</h5>
+    <p>Система защиты персональных данных учеников</p>
+    <div id="loginError" class="d-none mb-3"></div>
+    <div class="mb-3">
+      <label class="form-label">Логин</label>
+      <input id="loginUser" type="text" class="form-control" value="admin"/>
     </div>
+    <div class="mb-3">
+      <label class="form-label">Пароль</label>
+      <input id="loginPass" type="password" class="form-control" value="admin123"
+             onkeydown="if(event.key==='Enter') doLogin()"/>
+    </div>
+    <button class="btn-login" onclick="doLogin()">
+      <i class="bi bi-box-arrow-in-right me-2"></i>Войти
+    </button>
   </div>
 </div>
 
-<!-- ── App ───────────────────────────────────────────────────────────────────── -->
+<!-- ── App ─────────────────────────────────────────────────────────────────── -->
 <div id="app">
-  <nav class="navbar navbar-dark bg-dark px-3 py-2">
-    <span class="navbar-brand">
-      <i class="bi bi-shield-shaded text-warning me-2"></i>
-      <span>EDR — Защита ПД учеников</span>
-    </span>
-    <div class="d-flex align-items-center gap-3">
-      <span id="wsStatus" class="text-white-50 small">
-        <span class="ws-dot ws-off" id="wsDot"></span>WebSocket
-      </span>
-      <span class="text-white-50 small" id="currentUser"></span>
-      <button class="btn btn-sm btn-outline-light" onclick="doLogout()">
-        <i class="bi bi-box-arrow-right"></i>
-      </button>
-    </div>
-  </nav>
+  <div class="app-layout">
 
-  <div class="container-fluid py-4 px-4">
-
-    <!-- Stats -->
-    <div class="row g-3 mb-4">
-      <div class="col-6 col-md-3">
-        <div class="card stat-card high h-100">
-          <div class="card-body">
-            <div class="stat-value text-danger" id="statHigh">—</div>
-            <div class="text-muted small">HIGH-алерты</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-md-3">
-        <div class="card stat-card medium h-100">
-          <div class="card-body">
-            <div class="stat-value text-warning" id="statEvents">—</div>
-            <div class="text-muted small">Всего событий</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-md-3">
-        <div class="card stat-card agents h-100">
-          <div class="card-body">
-            <div class="stat-value text-primary" id="statAgents">—</div>
-            <div class="text-muted small">Агентов онлайн</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-md-3">
-        <div class="card stat-card pii h-100">
-          <div class="card-body">
-            <div class="stat-value text-success" id="statPii">—</div>
-            <div class="text-muted small">В карантине</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tabs -->
-    <ul class="nav nav-tabs mb-3" id="mainTabs">
-      <li class="nav-item">
-        <a class="nav-link active" data-bs-toggle="tab" href="#tabAlerts">
-          <i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>Алерты
-          <span class="badge bg-danger ms-1" id="tabBadge">0</span>
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabEvents">
-          <i class="bi bi-list-ul me-1"></i>События
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabAgents">
-          <i class="bi bi-pc-display-horizontal me-1"></i>Агенты
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabStatistics" onclick="loadStatistics()">
-          <i class="bi bi-bar-chart-fill me-1"></i>Статистика
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabPdFiles" onclick="loadPdFiles()">
-          <i class="bi bi-file-earmark-person-fill me-1 text-warning"></i>ПД-Файлы
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabQuarantine" onclick="loadQuarantine()">
-          <i class="bi bi-folder-x-fill me-1 text-warning"></i>Карантин
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabSettings" onclick="loadEmailSettings()">
-          <i class="bi bi-gear-fill me-1"></i>Настройки
-        </a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#tabPrivileges">
-          <i class="bi bi-person-check me-1"></i>Привилегии
-        </a>
-      </li>
-    </ul>
-
-    <div class="tab-content">
-
-      <!-- ── Tab: Alerts ──────────────────────────────────────────────────── -->
-      <div class="tab-pane fade show active" id="tabAlerts">
-        <div class="card shadow-sm">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <span class="fw-semibold">Активные алерты <span class="text-muted small">(нажмите на строку для деталей)</span></span>
-            <div class="d-flex gap-2">
-              <select id="alertSevFilter" class="form-select form-select-sm" style="width:130px" onchange="loadAlerts()">
-                <option value="">Все severity</option>
-                <option value="HIGH">HIGH</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="LOW">LOW</option>
-              </select>
-              <button class="btn btn-sm btn-outline-secondary" onclick="loadAlerts()">
-                <i class="bi bi-arrow-clockwise"></i>
-              </button>
-            </div>
-          </div>
-          <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr><th>Время</th><th>Агент</th><th>Тип</th><th>Severity</th><th>Описание</th><th></th></tr>
-              </thead>
-              <tbody id="alertsBody">
-                <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-icon"><i class="bi bi-shield-shaded"></i></div>
+        <div class="logo-title">EDR Platform</div>
+        <div class="logo-sub">Endpoint Detection and Response</div>
       </div>
 
-      <!-- ── Tab: Events ──────────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabEvents">
-        <div class="card shadow-sm">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <span class="fw-semibold">События <span class="text-muted small">(нажмите на строку для деталей)</span></span>
-            <div class="d-flex gap-2">
-              <div class="btn-group btn-group-sm" role="group">
-                <button class="btn btn-outline-secondary active" onclick="filterEvents('')"   id="evAll">Все</button>
-                <button class="btn btn-outline-danger"           onclick="filterEvents('HIGH')"   id="evHigh">HIGH</button>
-                <button class="btn btn-outline-warning"          onclick="filterEvents('MEDIUM')" id="evMed">MEDIUM</button>
-                <button class="btn btn-outline-success"          onclick="filterEvents('LOW')"    id="evLow">LOW</button>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary" onclick="loadEvents()">
-                <i class="bi bi-arrow-clockwise"></i>
-              </button>
-            </div>
-          </div>
-          <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr><th>Время</th><th>Агент</th><th>Пользователь</th><th>Тип события</th><th>Severity</th><th>Детали</th></tr>
-              </thead>
-              <tbody id="eventsBody">
-                <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── Tab: Agents ──────────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabAgents">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <span class="fw-semibold">Зарегистрированные агенты</span>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadAgents()">
-            <i class="bi bi-arrow-clockwise"></i>
+      <nav class="sidebar-nav">
+        <div class="nav-section">Мониторинг</div>
+        <div class="nav-item">
+          <button class="nav-link active" onclick="switchTab('tabAlerts')" id="sideAlerts">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            Алерты
+            <span class="nav-badge" id="tabBadge">0</span>
           </button>
         </div>
-        <div class="row g-3" id="agentsGrid">
-          <div class="col-12 text-muted">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ── Tab: Statistics ─────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabStatistics">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <span class="fw-semibold">Статистика событий (обновляется каждые 30 сек)</span>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadStatistics()">
-            <i class="bi bi-arrow-clockwise"></i>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabEvents')" id="sideEvents">
+            <i class="bi bi-list-ul"></i>
+            События
           </button>
         </div>
-        <div class="row g-3 mb-3" id="statSummaryRow">
-          <div class="col-6 col-md-3">
-            <div class="chart-card text-center">
-              <div class="fs-1 fw-bold text-danger" id="statTotalHigh">—</div>
-              <div class="text-muted small">HIGH событий</div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="chart-card text-center">
-              <div class="fs-1 fw-bold text-warning" id="statTotalMed">—</div>
-              <div class="text-muted small">MEDIUM событий</div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="chart-card text-center">
-              <div class="fs-1 fw-bold text-success" id="statTotalLow">—</div>
-              <div class="text-muted small">LOW событий</div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="chart-card text-center">
-              <div class="fs-1 fw-bold" id="statProtCount" style="color:#fd7e14">—</div>
-              <div class="text-muted small">В карантине</div>
-            </div>
-          </div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabAgents')" id="sideAgents">
+            <i class="bi bi-pc-display-horizontal"></i>
+            Агенты
+          </button>
         </div>
-        <div class="row g-3">
-          <div class="col-lg-8">
-            <div class="chart-card">
-              <div class="fw-semibold mb-2">Активность за 7 дней</div>
-              <canvas id="chartLine" height="80"></canvas>
-            </div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabStatistics'); loadStatistics();" id="sideStatistics">
+            <i class="bi bi-bar-chart-fill"></i>
+            Статистика
+          </button>
+        </div>
+        <div class="nav-section" style="margin-top:8px">Данные</div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabPdFiles'); loadPdFiles();" id="sidePdFiles">
+            <i class="bi bi-file-earmark-person-fill"></i>
+            ПД-Файлы
+          </button>
+        </div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabQuarantine'); loadQuarantine();" id="sideQuarantine">
+            <i class="bi bi-folder-x-fill"></i>
+            Карантин
+          </button>
+        </div>
+        <div class="nav-section" style="margin-top:8px">Система</div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabSettings'); loadEmailSettings();" id="sideSettings">
+            <i class="bi bi-gear-fill"></i>
+            Настройки
+          </button>
+        </div>
+        <div class="nav-item">
+          <button class="nav-link" onclick="switchTab('tabPrivileges')" id="sidePrivileges">
+            <i class="bi bi-person-check-fill"></i>
+            Привилегии
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-status">
+          <div class="d-flex align-items-center">
+            <span class="status-dot"></span>
+            <span class="status-text">Защита активна</span>
           </div>
-          <div class="col-lg-4">
-            <div class="chart-card">
-              <div class="fw-semibold mb-2">Severity breakdown</div>
-              <canvas id="chartPie" height="180"></canvas>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="chart-card">
-              <div class="fw-semibold mb-2">Топ типов событий</div>
-              <canvas id="chartBar" height="120"></canvas>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="chart-card">
-              <div class="fw-semibold mb-2">Топ-5 агентов</div>
-              <canvas id="chartAgents" height="120"></canvas>
-            </div>
-          </div>
+          <div class="status-sub">Агент мониторит файловую систему</div>
         </div>
       </div>
+    </aside>
 
-      <!-- ── Tab: PD-Files ────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabPdFiles">
-        <div class="card shadow-sm">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <span class="fw-semibold">
-              <i class="bi bi-file-earmark-person-fill text-warning me-1"></i>
-              Файлы с персональными данными
-            </span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="loadPdFiles()">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
-          </div>
-          <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>Файл</th><th>Типы ПД</th><th>Уровень</th>
-                  <th>Агент</th><th>Дата</th><th>Статус</th><th></th>
-                </tr>
-              </thead>
-              <tbody id="pdFilesBody">
-                <tr><td colspan="7" class="text-center text-muted py-3">Загрузка...</td></tr>
-              </tbody>
-            </table>
-          </div>
+    <!-- Main -->
+    <div class="main-content">
+      <!-- Topbar -->
+      <div class="topbar">
+        <div class="topbar-title">
+          Endpoint Detection and Response
+          <span id="topbarTabName">/ Алерты</span>
         </div>
+        <span id="wsStatus">
+          <span class="ws-dot ws-off" id="wsDot"></span>WebSocket
+        </span>
+        <span class="user-badge"><i class="bi bi-person-fill me-1"></i><span id="currentUser"></span></span>
+        <button class="btn-logout" onclick="doLogout()">
+          <i class="bi bi-box-arrow-right me-1"></i>Выход
+        </button>
       </div>
 
-      <!-- ── Tab: Quarantine ───────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabQuarantine">
-        <div class="card shadow-sm">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <span class="fw-semibold">
-              <i class="bi bi-folder-x-fill text-warning me-1"></i>
-              Файлы в карантине
-            </span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="loadQuarantine()">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
+      <!-- Content -->
+      <div class="content-scroll">
+
+        <!-- Stat cards -->
+        <div class="stat-grid">
+          <div class="stat-card stat-card-high">
+            <i class="bi bi-shield-exclamation stat-icon"></i>
+            <div class="stat-value" id="statHigh">—</div>
+            <div class="stat-label">HIGH Алерты</div>
           </div>
-          <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>Файл и путь</th><th>Типы ПД</th>
-                  <th>Агент</th><th>Дата</th><th>Статус</th><th></th>
-                </tr>
-              </thead>
-              <tbody id="quarantineBody">
-                <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
-              </tbody>
-            </table>
+          <div class="stat-card stat-card-events">
+            <i class="bi bi-activity stat-icon"></i>
+            <div class="stat-value" id="statEvents">—</div>
+            <div class="stat-label">Всего событий</div>
+          </div>
+          <div class="stat-card stat-card-agents">
+            <i class="bi bi-pc-display stat-icon"></i>
+            <div class="stat-value" id="statAgents">—</div>
+            <div class="stat-label">Агентов онлайн</div>
+          </div>
+          <div class="stat-card stat-card-pii">
+            <i class="bi bi-folder-x-fill stat-icon"></i>
+            <div class="stat-value" id="statPii">—</div>
+            <div class="stat-label">В карантине</div>
           </div>
         </div>
-      </div>
 
-      <!-- ── Tab: Settings ──────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabSettings">
-        <div class="row g-3">
-          <!-- Email settings -->
-          <div class="col-md-6">
-            <div class="card shadow-sm">
-              <div class="card-header fw-semibold">
-                <i class="bi bi-envelope-fill me-1"></i>Email-уведомления (HIGH-алерты)
-              </div>
-              <div class="card-body">
-                <div class="form-check form-switch mb-3">
-                  <input class="form-check-input" type="checkbox" id="emailEnabled"/>
-                  <label class="form-check-label" for="emailEnabled">Включить email-уведомления</label>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label small">SMTP хост</label>
-                  <input id="smtpHost" type="text" class="form-control form-control-sm" placeholder="smtp.gmail.com"/>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label small">SMTP порт</label>
-                  <input id="smtpPort" type="number" class="form-control form-control-sm" value="587"/>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label small">Логин (от@gmail.com)</label>
-                  <input id="smtpUser" type="text" class="form-control form-control-sm"/>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label small">Пароль приложения</label>
-                  <input id="smtpPass" type="password" class="form-control form-control-sm" placeholder="Оставьте пустым чтобы не менять"/>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label small">Email директора (получатель)</label>
-                  <input id="directorEmail" type="email" class="form-control form-control-sm" placeholder="director@school.kz"/>
-                </div>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-primary btn-sm" onclick="saveEmailSettings()">
-                    <i class="bi bi-save me-1"></i>Сохранить
-                  </button>
-                  <button class="btn btn-outline-secondary btn-sm" onclick="testEmail()">
-                    <i class="bi bi-send me-1"></i>Тест
-                  </button>
-                </div>
-                <div id="emailMsg" class="mt-2 small"></div>
-              </div>
-            </div>
-          </div>
-          <!-- Reports -->
-          <div class="col-md-6">
-            <div class="card shadow-sm">
-              <div class="card-header fw-semibold">
-                <i class="bi bi-file-earmark-pdf-fill me-1 text-danger"></i>PDF-отчёты
-              </div>
-              <div class="card-body">
-                <p class="text-muted small">Генерация PDF-отчётов с таблицей событий, статистикой severity и топом нарушений.</p>
-                <div class="d-grid gap-2">
-                  <a href="/reports/weekly" class="btn btn-outline-danger" target="_blank">
-                    <i class="bi bi-file-earmark-pdf me-1"></i>
-                    Еженедельный отчёт (последние 7 дней)
-                  </a>
-                  <a href="/reports/monthly" class="btn btn-outline-danger" target="_blank">
-                    <i class="bi bi-file-earmark-pdf me-1"></i>
-                    Ежемесячный отчёт (последние 30 дней)
-                  </a>
-                </div>
-                <hr/>
-                <p class="text-muted small mb-2">Чтобы скачать отчёты, нужно быть авторизованным.</p>
-                <button class="btn btn-sm btn-outline-secondary" onclick="downloadReport('weekly')">
-                  <i class="bi bi-download me-1"></i>Скачать недельный
-                </button>
-                <button class="btn btn-sm btn-outline-secondary ms-2" onclick="downloadReport('monthly')">
-                  <i class="bi bi-download me-1"></i>Скачать месячный
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        <!-- Tab content -->
+        <div id="tabContent">
 
-      <!-- ── Tab: Privileges ──────────────────────────────────────────────── -->
-      <div class="tab-pane fade" id="tabPrivileges">
-        <div class="row g-3">
-          <div class="col-md-4">
-            <div class="card shadow-sm">
-              <div class="card-header fw-semibold">Выдать привилегию</div>
-              <div class="card-body">
-                <div class="mb-2">
-                  <label class="form-label small">Пользователь</label>
-                  <input id="privUser" type="text" class="form-control form-control-sm" placeholder="username"/>
+          <!-- ── Alerts ─────────────────────────────────────────────── -->
+          <div class="tab-pane active" id="tabAlerts">
+            <div class="dark-card">
+              <div class="dark-card-header">
+                <span><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>Активные алерты</span>
+                <div class="header-right">
+                  <select id="alertSevFilter" class="dark-select" onchange="loadAlerts()">
+                    <option value="">Все severity</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="LOW">LOW</option>
+                  </select>
+                  <button class="btn-dark-outline" onclick="loadAlerts()"><i class="bi bi-arrow-clockwise"></i></button>
                 </div>
-                <div class="mb-2">
-                  <label class="form-label small">Агент (пустое = все)</label>
-                  <input id="privAgent" type="text" class="form-control form-control-sm" placeholder="PC-01"/>
-                </div>
-                <div class="form-check mb-1">
-                  <input class="form-check-input" type="checkbox" id="privUnlock"/>
-                  <label class="form-check-label small" for="privUnlock">Разблокировка файлов</label>
-                </div>
-                <div class="form-check mb-3">
-                  <input class="form-check-input" type="checkbox" id="privViewPii"/>
-                  <label class="form-check-label small" for="privViewPii">Просмотр ПД-файлов</label>
-                </div>
-                <button class="btn btn-primary btn-sm w-100" onclick="grantPrivilege()">Выдать</button>
-                <div id="privMsg" class="mt-2 small"></div>
               </div>
-            </div>
-          </div>
-          <div class="col-md-8">
-            <div class="card shadow-sm">
-              <div class="card-header d-flex justify-content-between">
-                <span class="fw-semibold">Текущие привилегии</span>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadPrivileges()">
-                  <i class="bi bi-arrow-clockwise"></i>
-                </button>
-              </div>
-              <div class="card-body p-0">
-                <table class="table table-hover mb-0">
+              <div class="dark-card-body">
+                <table class="dark-table">
                   <thead>
-                    <tr><th>Пользователь</th><th>Агент</th><th>Разблокировка</th><th>Просмотр ПД</th><th>Выдал</th><th>Дата</th></tr>
+                    <tr><th>Время</th><th>Агент</th><th>Тип</th><th>Severity</th><th>Описание</th><th></th></tr>
                   </thead>
-                  <tbody id="privBody">
-                    <tr><td colspan="6" class="text-center text-muted py-3">Загрузка...</td></tr>
+                  <tbody id="alertsBody">
+                    <tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Загрузка...</td></tr>
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
-    </div><!-- /tab-content -->
-  </div><!-- /container -->
+          <!-- ── Events ─────────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabEvents">
+            <div class="dark-card">
+              <div class="dark-card-header">
+                <span><i class="bi bi-list-ul me-2"></i>События</span>
+                <div class="header-right">
+                  <div class="filter-group">
+                    <button class="filter-btn active-all" onclick="filterEvents('')" id="evAll">Все</button>
+                    <button class="filter-btn" onclick="filterEvents('HIGH')" id="evHigh">HIGH</button>
+                    <button class="filter-btn" onclick="filterEvents('MEDIUM')" id="evMed">MED</button>
+                    <button class="filter-btn" onclick="filterEvents('LOW')" id="evLow">LOW</button>
+                  </div>
+                  <button class="btn-dark-outline" onclick="loadEvents()"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+              </div>
+              <div class="dark-card-body">
+                <table class="dark-table">
+                  <thead>
+                    <tr><th>Время</th><th>Агент</th><th>Пользователь</th><th>Тип события</th><th>Severity</th><th>Детали</th></tr>
+                  </thead>
+                  <tbody id="eventsBody">
+                    <tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Загрузка...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Agents ─────────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabAgents">
+            <div class="section-header">
+              <span><i class="bi bi-pc-display-horizontal me-2"></i>Зарегистрированные агенты</span>
+              <button class="btn-dark-outline" onclick="loadAgents()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
+            </div>
+            <div class="agents-grid" id="agentsGrid">
+              <div style="color:var(--text-muted)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ── Statistics ─────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabStatistics">
+            <div class="section-header">
+              <span><i class="bi bi-bar-chart-fill me-2"></i>Статистика событий</span>
+              <button class="btn-dark-outline" onclick="loadStatistics()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+              <div class="chart-card stat-mini">
+                <div class="sm-val" id="statTotalHigh" style="color:#f87171">—</div>
+                <div class="sm-label">HIGH событий</div>
+              </div>
+              <div class="chart-card stat-mini">
+                <div class="sm-val" id="statTotalMed" style="color:#fbbf24">—</div>
+                <div class="sm-label">MEDIUM событий</div>
+              </div>
+              <div class="chart-card stat-mini">
+                <div class="sm-val" id="statTotalLow" style="color:#9ca3af">—</div>
+                <div class="sm-label">LOW событий</div>
+              </div>
+              <div class="chart-card stat-mini">
+                <div class="sm-val" id="statProtCount" style="color:#fbbf24">—</div>
+                <div class="sm-label">В карантине</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px">
+              <div class="chart-card">
+                <div class="chart-title">Активность за 7 дней</div>
+                <canvas id="chartLine" height="80"></canvas>
+              </div>
+              <div class="chart-card">
+                <div class="chart-title">Severity breakdown</div>
+                <canvas id="chartPie" height="180"></canvas>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div class="chart-card">
+                <div class="chart-title">Топ типов событий</div>
+                <canvas id="chartBar" height="120"></canvas>
+              </div>
+              <div class="chart-card">
+                <div class="chart-title">Топ-5 агентов</div>
+                <canvas id="chartAgents" height="120"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── PD Files ────────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabPdFiles">
+            <div class="dark-card">
+              <div class="dark-card-header">
+                <span><i class="bi bi-file-earmark-person-fill me-2" style="color:#fbbf24"></i>Файлы с персональными данными</span>
+                <button class="btn-dark-outline" onclick="loadPdFiles()"><i class="bi bi-arrow-clockwise"></i></button>
+              </div>
+              <div class="dark-card-body">
+                <table class="dark-table">
+                  <thead>
+                    <tr><th>Файл</th><th>Типы ПД</th><th>Уровень</th><th>Агент</th><th>Дата</th><th>Статус</th><th></th></tr>
+                  </thead>
+                  <tbody id="pdFilesBody">
+                    <tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Загрузка...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Quarantine ─────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabQuarantine">
+            <div class="dark-card">
+              <div class="dark-card-header">
+                <span><i class="bi bi-folder-x-fill me-2" style="color:#fbbf24"></i>Файлы в карантине</span>
+                <button class="btn-dark-outline" onclick="loadQuarantine()"><i class="bi bi-arrow-clockwise"></i></button>
+              </div>
+              <div class="dark-card-body">
+                <table class="dark-table">
+                  <thead>
+                    <tr><th>Файл и путь</th><th>Типы ПД</th><th>Агент</th><th>Дата</th><th>Статус</th><th></th></tr>
+                  </thead>
+                  <tbody id="quarantineBody">
+                    <tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Загрузка...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Settings ───────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabSettings">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <!-- Change password -->
+              <div class="dark-card">
+                <div class="dark-card-header"><i class="bi bi-key-fill me-2" style="color:#a78bfa"></i>Смена пароля</div>
+                <div class="dark-card-body padded">
+                  <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:16px">
+                    Введите текущий пароль и новый для его замены.
+                  </p>
+                  <div class="mb-2">
+                    <label class="dark-form-label">Текущий пароль</label>
+                    <input id="pwdCurrent" type="password" class="dark-input" placeholder="Текущий пароль"/>
+                  </div>
+                  <div class="mb-2">
+                    <label class="dark-form-label">Новый пароль</label>
+                    <input id="pwdNew" type="password" class="dark-input" placeholder="Минимум 6 символов"/>
+                  </div>
+                  <div class="mb-3">
+                    <label class="dark-form-label">Повторите новый пароль</label>
+                    <input id="pwdConfirm" type="password" class="dark-input" placeholder="Повторите новый пароль"/>
+                  </div>
+                  <button class="btn-accent" onclick="changePassword()"><i class="bi bi-key me-1"></i>Изменить пароль</button>
+                  <div id="pwdMsg" class="form-msg"></div>
+                </div>
+              </div>
+              <!-- PDF reports -->
+              <div class="dark-card">
+                <div class="dark-card-header"><i class="bi bi-file-earmark-pdf-fill me-2" style="color:#f87171"></i>PDF-отчёты</div>
+                <div class="dark-card-body padded">
+                  <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:16px">
+                    Генерация PDF-отчётов с таблицей событий, статистикой severity и топом нарушений.
+                  </p>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <button class="btn-dark-outline" onclick="downloadReport('weekly')" style="text-align:left;padding:10px 14px">
+                      <i class="bi bi-file-earmark-pdf me-2" style="color:#f87171"></i>Еженедельный отчёт (7 дней)
+                      <i class="bi bi-download ms-auto float-end" style="color:var(--text-muted)"></i>
+                    </button>
+                    <button class="btn-dark-outline" onclick="downloadReport('monthly')" style="text-align:left;padding:10px 14px">
+                      <i class="bi bi-file-earmark-pdf me-2" style="color:#f87171"></i>Ежемесячный отчёт (30 дней)
+                      <i class="bi bi-download ms-auto float-end" style="color:var(--text-muted)"></i>
+                    </button>
+                  </div>
+                  <p style="font-size:.75rem;color:var(--text-dim);margin-top:14px">
+                    Для скачивания необходима авторизация.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hidden inputs kept for API compatibility -->
+          <div style="display:none">
+            <input id="emailEnabled" type="checkbox"/>
+            <input id="smtpHost"/><input id="smtpPort"/><input id="smtpUser"/>
+            <input id="smtpPass"/><input id="directorEmail"/>
+            <span id="emailMsg"></span>
+          </div>
+
+          <!-- ── Privileges ─────────────────────────────────────────── -->
+          <div class="tab-pane" id="tabPrivileges">
+            <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px">
+              <div class="dark-card">
+                <div class="dark-card-header"><i class="bi bi-person-plus-fill me-2"></i>Выдать привилегию</div>
+                <div class="dark-card-body padded">
+                  <div class="mb-2">
+                    <label class="dark-form-label">Пользователь</label>
+                    <input id="privUser" type="text" class="dark-input" placeholder="username"/>
+                  </div>
+                  <div class="mb-2">
+                    <label class="dark-form-label">Агент (пустое = все)</label>
+                    <input id="privAgent" type="text" class="dark-input" placeholder="PC-01"/>
+                  </div>
+                  <label class="dark-switch" style="margin-top:10px">
+                    <input type="checkbox" id="privUnlock"/>
+                    <label for="privUnlock">Разблокировка файлов</label>
+                  </label>
+                  <label class="dark-switch">
+                    <input type="checkbox" id="privViewPii"/>
+                    <label for="privViewPii">Просмотр ПД-файлов</label>
+                  </label>
+                  <button class="btn-accent" style="width:100%;margin-top:4px" onclick="grantPrivilege()">Выдать привилегию</button>
+                  <div id="privMsg" class="form-msg"></div>
+                </div>
+              </div>
+              <div class="dark-card">
+                <div class="dark-card-header">
+                  <span><i class="bi bi-person-check me-2"></i>Текущие привилегии</span>
+                  <button class="btn-dark-outline" onclick="loadPrivileges()"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="dark-card-body">
+                  <table class="dark-table">
+                    <thead>
+                      <tr><th>Пользователь</th><th>Агент</th><th>Разблокировка</th><th>Просмотр ПД</th><th>Выдал</th><th>Дата</th></tr>
+                    </thead>
+                    <tbody id="privBody">
+                      <tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Загрузка...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /tabContent -->
+      </div><!-- /content-scroll -->
+    </div><!-- /main-content -->
+  </div><!-- /app-layout -->
 </div><!-- /app -->
 
-<!-- ── Детальное модальное окно ───────────────────────────────────────────────── -->
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ── Detail Modal ────────────────────────────────────────────────────────── -->
 <div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -524,6 +835,47 @@ let ws = null;
 let detailModal = null;
 let _charts = {};
 let _statsTimer = null;
+let _activeTab = 'tabAlerts';
+
+// ── Tab nav ───────────────────────────────────────────────────────────────────
+const TAB_NAMES = {
+  tabAlerts: 'Алерты', tabEvents: 'События', tabAgents: 'Агенты',
+  tabStatistics: 'Статистика', tabPdFiles: 'ПД-Файлы',
+  tabQuarantine: 'Карантин', tabSettings: 'Настройки', tabPrivileges: 'Привилегии',
+};
+const SIDE_IDS = {
+  tabAlerts: 'sideAlerts', tabEvents: 'sideEvents', tabAgents: 'sideAgents',
+  tabStatistics: 'sideStatistics', tabPdFiles: 'sidePdFiles',
+  tabQuarantine: 'sideQuarantine', tabSettings: 'sideSettings', tabPrivileges: 'sidePrivileges',
+};
+
+function switchTab(paneId) {
+  const current = document.getElementById(_activeTab);
+  if (current) current.classList.remove('active');
+  const next = document.getElementById(paneId);
+  if (next) next.classList.add('active');
+
+  document.querySelectorAll('.sidebar-nav .nav-link').forEach(el => el.classList.remove('active'));
+  const sideEl = document.getElementById(SIDE_IDS[paneId]);
+  if (sideEl) sideEl.classList.add('active');
+
+  const nameEl = document.getElementById('topbarTabName');
+  if (nameEl) nameEl.textContent = '/ ' + (TAB_NAMES[paneId] || paneId);
+
+  _activeTab = paneId;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toastContainer');
+  const item = document.createElement('div');
+  item.className = `toast-item t-${type}`;
+  const icons = {success: 'bi-check-circle-fill', warning: 'bi-exclamation-triangle-fill', danger: 'bi-x-circle-fill'};
+  const colors = {success: '#34d399', warning: '#fbbf24', danger: '#f87171'};
+  item.innerHTML = `<i class="bi ${icons[type]||'bi-info-circle-fill'} me-2" style="color:${colors[type]||'#60a5fa'}"></i>${escHtml(message)}`;
+  container.appendChild(item);
+  setTimeout(() => item.remove && item.remove(), 4000);
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function doLogin() {
@@ -618,41 +970,44 @@ async function loadPiiCount() {
 async function loadPdFiles() {
   const data = await apiFetch('/pd-files');
   const tbody = document.getElementById('pdFilesBody');
-  if (!data || !data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Нет файлов с ПД</td></tr>';
+  if (!data) { tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Ошибка загрузки</td></tr>'; return; }
+  const visible = data.filter(f => !f.is_blocked);
+  if (!visible.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Нет файлов с ПД</td></tr>';
     return;
   }
-  const piiColors = {IIN:'danger',CARD:'danger',DOC_NUM:'danger',PHONE:'warning',EMAIL:'info',FIO:'primary',DOB:'secondary'};
-  tbody.innerHTML = data.map(f => {
+  tbody.innerHTML = visible.map(f => {
     const types = (f.pii_types||'').split(',').filter(Boolean);
-    const badges = types.map(t => `<span class="badge bg-${piiColors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+    const badges = types.map(t => `<span class="pii-tag pii-${t.trim()}">${t.trim()}</span>`).join('');
     const hasHigh = ['IIN','CARD','DOC_NUM'].some(h => types.includes(h));
     const sev = hasHigh
-      ? '<span class="badge bg-danger">HIGH</span>'
-      : types.length ? '<span class="badge bg-warning text-dark">MEDIUM</span>'
-      : '<span class="badge bg-secondary">LOW</span>';
+      ? '<span class="badge-sev badge-HIGH">HIGH</span>'
+      : types.length ? '<span class="badge-sev badge-MEDIUM">MEDIUM</span>'
+      : '<span class="badge-sev badge-LOW">LOW</span>';
     const conf = (f.confidence*100).toFixed(0)+'%';
     const dt   = f.detected_at ? f.detected_at.substring(0,16).replace('T',' ') : '—';
     let status, btn;
     if (f.is_blocked) {
-      status = '<span class="badge bg-secondary">В карантине</span>';
+      status = '<span class="quarantine-badge"><i class="bi bi-lock-fill me-1"></i>В карантине</span>';
       btn = '';
     } else if (f.pending_quarantine) {
-      status = '<span class="badge bg-warning text-dark">Ожидает...</span>';
-      btn = '<button class="btn btn-sm btn-outline-secondary" disabled>Ожидает</button>';
+      status = '<span class="waiting-badge">Ожидает...</span>';
+      btn = '<button class="btn-dark-outline" disabled style="opacity:.5">Ожидает</button>';
     } else {
-      status = '<span class="badge bg-success">На компьютере</span>';
-      btn = `<button class="btn btn-sm btn-outline-danger" onclick="requestQuarantine(${f.id})">
+      status = '<span class="online-card-badge">На компьютере</span>';
+      btn = `<button class="btn-danger-dark" onclick="requestQuarantine(${f.id})">
                <i class="bi bi-folder-x-fill me-1"></i>Карантин
              </button>`;
     }
     return `<tr>
-      <td><span title="${escHtml(f.file_path)}">${escHtml(f.file_name||'—')}</span><br>
-          <small class="text-muted">${conf} уверенность</small></td>
+      <td>
+        <div style="font-weight:600;font-size:.83rem">${escHtml(f.file_name||'—')}</div>
+        <div style="font-size:.72rem;color:var(--text-muted)">${conf} уверенность</div>
+      </td>
       <td>${badges||'—'}</td>
       <td>${sev}</td>
-      <td>${escHtml(f.agent_id||'—')}</td>
-      <td>${dt}</td>
+      <td><code>${escHtml(f.agent_id||'—')}</code></td>
+      <td style="color:var(--text-muted);font-size:.78rem">${dt}</td>
       <td>${status}</td>
       <td>${btn}</td>
     </tr>`;
@@ -676,31 +1031,29 @@ async function requestQuarantine(id) {
 async function loadQuarantine() {
   const data = await apiFetch('/quarantine');
   const tbody = document.getElementById('quarantineBody');
-  if (!data) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Ошибка загрузки</td></tr>'; return; }
-  if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Карантин пуст</td></tr>'; return; }
-  const colors = {IIN:'danger', PHONE:'primary', EMAIL:'info', FIO:'success', DOB:'warning'};
+  if (!data) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Ошибка загрузки</td></tr>'; return; }
+  if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Карантин пуст</td></tr>'; return; }
   tbody.innerHTML = data.map(f => {
     const types = (f.pii_types || '').split(',').filter(Boolean);
-    const typesBadges = types.map(t => `<span class="badge bg-${colors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+    const typesBadges = types.map(t => `<span class="pii-tag pii-${t.trim()}">${t.trim()}</span>`).join('');
     const status = f.is_restored
-      ? '<span class="badge bg-success">Восстановлен</span>'
-      : '<span class="badge bg-warning text-dark"><i class="bi bi-lock-fill me-1"></i>В карантине</span>';
+      ? '<span class="restored-badge"><i class="bi bi-check-circle-fill me-1"></i>Восстановлен</span>'
+      : '<span class="quarantine-badge"><i class="bi bi-lock-fill me-1"></i>В карантине</span>';
     const actions = !f.is_restored ? `
-      <button class="btn btn-sm btn-outline-success py-0 me-1" onclick="restoreFile(${f.id}, '${escHtml(f.file_name||'')}')">
+      <button class="btn-success-dark me-1" onclick="restoreFile(${f.id}, '${escHtml(f.file_name||'')}')">
         <i class="bi bi-arrow-counterclockwise me-1"></i>Восстановить
       </button>
-      <button class="btn btn-sm btn-outline-danger py-0" onclick="deleteForever(${f.id}, '${escHtml(f.file_name||'')}')">
+      <button class="btn-danger-dark" onclick="deleteForever(${f.id}, '${escHtml(f.file_name||'')}')">
         <i class="bi bi-trash3 me-1"></i>Удалить
       </button>` : '';
     return `<tr>
       <td>
-        <i class="bi bi-file-earmark-x text-warning me-1"></i>
-        <strong>${escHtml(f.file_name||'—')}</strong><br>
-        <code class="small text-muted" title="${escHtml(f.original_path)}">${escHtml(f.original_path||'—')}</code>
+        <div style="font-weight:600"><i class="bi bi-file-earmark-x me-1" style="color:#fbbf24"></i>${escHtml(f.file_name||'—')}</div>
+        <code style="font-size:.72rem;color:var(--text-muted)">${escHtml(f.original_path||'—')}</code>
       </td>
       <td>${typesBadges || '—'}</td>
-      <td><code class="small">${escHtml(f.agent_id||'—')}</code></td>
-      <td>${fmtTime(f.timestamp)}</td>
+      <td><code>${escHtml(f.agent_id||'—')}</code></td>
+      <td style="color:var(--text-muted);font-size:.78rem">${fmtTime(f.timestamp)}</td>
       <td>${status}</td>
       <td style="white-space:nowrap">${actions}</td>
     </tr>`;
@@ -717,7 +1070,6 @@ async function restoreFile(id, fname) {
   });
   if (r.ok) {
     showToast('Команда восстановления отправлена агенту', 'success');
-    // Агент восстанавливает асинхронно — обновляем через 8 сек
     setTimeout(async () => { await loadQuarantine(); await loadPdFiles(); await loadPiiCount(); }, 8000);
   } else {
     const err = await r.json().catch(()=>({}));
@@ -752,58 +1104,55 @@ async function loadStatistics() {
   document.getElementById('statTotalLow').textContent  = data.low || 0;
   document.getElementById('statProtCount').textContent = data.quarantine !== undefined ? data.quarantine : (data.quarantine_count || data.protected_files || 0);
 
-  // Destroy old charts
   Object.values(_charts).forEach(c => c.destroy());
   _charts = {};
 
-  // 7-day line chart
+  Chart.defaults.color = '#6b7099';
+  Chart.defaults.borderColor = 'rgba(255,255,255,.06)';
+
   const days = data.by_day || [];
   _charts.line = new Chart(document.getElementById('chartLine'), {
     type: 'line',
     data: {
-      labels: days.map(d => d.date.slice(5)),  // MM-DD
+      labels: days.map(d => d.date.slice(5)),
       datasets: [
-        {label:'HIGH',   data: days.map(d=>d.HIGH),   borderColor:'#dc3545', backgroundColor:'rgba(220,53,69,.1)', tension:.3, fill:true},
-        {label:'MEDIUM', data: days.map(d=>d.MEDIUM), borderColor:'#ffc107', backgroundColor:'rgba(255,193,7,.1)',  tension:.3, fill:true},
-        {label:'LOW',    data: days.map(d=>d.LOW),    borderColor:'#198754', backgroundColor:'rgba(25,135,84,.1)',  tension:.3, fill:true},
+        {label:'HIGH',   data: days.map(d=>d.HIGH),   borderColor:'#f43f5e', backgroundColor:'rgba(244,63,94,.08)', tension:.3, fill:true},
+        {label:'MEDIUM', data: days.map(d=>d.MEDIUM), borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.06)',  tension:.3, fill:true},
+        {label:'LOW',    data: days.map(d=>d.LOW),    borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.05)', tension:.3, fill:true},
       ]
     },
-    options: { plugins:{legend:{position:'top'}}, scales:{y:{beginAtZero:true, ticks:{stepSize:1}}} }
+    options: { plugins:{legend:{position:'top',labels:{color:'#6b7099'}}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
   });
 
-  // Pie chart
   _charts.pie = new Chart(document.getElementById('chartPie'), {
     type: 'doughnut',
     data: {
       labels: ['HIGH','MEDIUM','LOW'],
-      datasets: [{data:[data.high||0, data.medium||0, data.low||0], backgroundColor:['#dc3545','#ffc107','#198754']}]
+      datasets: [{data:[data.high||0, data.medium||0, data.low||0], backgroundColor:['#f43f5e','#f59e0b','#374151'], borderWidth:0}]
     },
-    options: { plugins:{legend:{position:'bottom'}} }
+    options: { plugins:{legend:{position:'bottom',labels:{color:'#6b7099'}}}, cutout:'65%' }
   });
 
-  // Bar chart — event types
   const types  = Object.entries(data.by_type || {});
   _charts.bar  = new Chart(document.getElementById('chartBar'), {
     type: 'bar',
     data: {
       labels: types.map(([k])=>k.replace(/_/g,' ')),
-      datasets: [{label:'Событий', data: types.map(([,v])=>v), backgroundColor:'rgba(13,110,253,.7)'}]
+      datasets: [{label:'Событий', data: types.map(([,v])=>v), backgroundColor:'rgba(124,58,237,.65)', borderRadius:4}]
     },
-    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{beginAtZero:true}} }
+    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:9}}}, y:{beginAtZero:true}} }
   });
 
-  // Bar chart — agents
   const agents = Object.entries(data.by_agent || {});
   _charts.agents = new Chart(document.getElementById('chartAgents'), {
     type: 'bar',
     data: {
       labels: agents.map(([k])=>k),
-      datasets: [{label:'Событий', data: agents.map(([,v])=>v), backgroundColor:'rgba(102,16,242,.7)'}]
+      datasets: [{label:'Событий', data: agents.map(([,v])=>v), backgroundColor:'rgba(233,30,140,.55)', borderRadius:4}]
     },
-    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{beginAtZero:true}} }
+    options: { plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:9}}}, y:{beginAtZero:true}} }
   });
 
-  // Auto-refresh every 30s when tab is active
   if (!_statsTimer) {
     _statsTimer = setInterval(loadStatistics, 30000);
   }
@@ -832,20 +1181,51 @@ async function saveEmailSettings() {
   };
   const r = await apiFetch('/settings/email', {method:'POST', body: JSON.stringify(payload)});
   if (r) {
-    msg.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Настройки сохранены</span>';
+    msg.innerHTML = '<span style="color:#34d399"><i class="bi bi-check-circle me-1"></i>Настройки сохранены</span>';
   } else {
-    msg.innerHTML = '<span class="text-danger">Ошибка сохранения</span>';
+    msg.innerHTML = '<span style="color:#f87171">Ошибка сохранения</span>';
   }
 }
 
 async function testEmail() {
   const msg = document.getElementById('emailMsg');
-  msg.innerHTML = '<span class="text-muted">Отправка...</span>';
+  msg.innerHTML = '<span style="color:var(--text-muted)">Отправка...</span>';
   const r = await apiFetch('/settings/email/test', {method:'POST'});
   if (r) {
-    msg.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Тестовый email отправлен</span>';
+    msg.innerHTML = '<span style="color:#34d399"><i class="bi bi-check-circle me-1"></i>Тестовый email отправлен</span>';
   } else {
-    msg.innerHTML = '<span class="text-danger">Ошибка отправки — проверьте настройки</span>';
+    msg.innerHTML = '<span style="color:#f87171">Ошибка отправки — проверьте настройки</span>';
+  }
+}
+
+// ── Change password ───────────────────────────────────────────────────────────
+async function changePassword() {
+  const msg     = document.getElementById('pwdMsg');
+  const current = document.getElementById('pwdCurrent').value;
+  const newPwd  = document.getElementById('pwdNew').value;
+  const confirm = document.getElementById('pwdConfirm').value;
+  if (!current || !newPwd) {
+    msg.innerHTML = '<span style="color:#f87171">Заполните все поля</span>'; return;
+  }
+  if (newPwd !== confirm) {
+    msg.innerHTML = '<span style="color:#f87171">Новые пароли не совпадают</span>'; return;
+  }
+  if (newPwd.length < 6) {
+    msg.innerHTML = '<span style="color:#f87171">Пароль слишком короткий (минимум 6 символов)</span>'; return;
+  }
+  const r = await fetch('/auth/change-password', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
+    body: JSON.stringify({current_password: current, new_password: newPwd}),
+  });
+  if (r.ok) {
+    msg.innerHTML = '<span style="color:#34d399"><i class="bi bi-check-circle me-1"></i>Пароль успешно изменён</span>';
+    document.getElementById('pwdCurrent').value = '';
+    document.getElementById('pwdNew').value = '';
+    document.getElementById('pwdConfirm').value = '';
+  } else {
+    const err = await r.json().catch(()=>({}));
+    msg.innerHTML = `<span style="color:#f87171">${escHtml(err.detail||'Ошибка')}</span>`;
   }
 }
 
@@ -877,18 +1257,18 @@ function fmtTime(ts) {
 function renderAlerts(alerts) {
   const tbody = document.getElementById('alertsBody');
   if (!alerts.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет активных алертов</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Нет активных алертов</td></tr>';
     return;
   }
   tbody.innerHTML = alerts.map(a => `
     <tr class="clickable-row ${a.severity==='HIGH'?'alert-row-HIGH':''}" onclick="showAlertDetail(${a.id})">
-      <td>${fmtTime(a.timestamp)}</td>
+      <td style="color:var(--text-muted);font-size:.78rem">${fmtTime(a.timestamp)}</td>
       <td><code>${escHtml(a.agent_id||'—')}</code></td>
-      <td><span class="fw-semibold">${escHtml(a.alert_type)}</span></td>
+      <td><span style="font-weight:600">${escHtml(a.alert_type)}</span></td>
       <td>${sevBadge(a.severity)}</td>
-      <td class="text-truncate" style="max-width:280px" title="${escHtml(a.description||'')}">${escHtml(a.description||'')}</td>
+      <td class="text-truncate-cell" title="${escHtml(a.description||'')}" style="color:var(--text-muted)">${escHtml(a.description||'')}</td>
       <td onclick="event.stopPropagation()">
-        <button class="btn btn-sm btn-outline-success py-0" onclick="resolveAlert(${a.id})">
+        <button class="btn-success-dark" onclick="resolveAlert(${a.id})">
           <i class="bi bi-check2"></i>
         </button>
       </td>
@@ -898,40 +1278,35 @@ function renderAlerts(alerts) {
 function renderEvents(events) {
   const tbody = document.getElementById('eventsBody');
   if (!events.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет событий</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Нет событий</td></tr>';
     return;
   }
   tbody.innerHTML = events.slice(0,200).map(e => `
     <tr class="clickable-row" onclick="showEventDetail(${e.id})">
-      <td>${fmtTime(e.timestamp)}</td>
+      <td style="color:var(--text-muted);font-size:.78rem">${fmtTime(e.timestamp)}</td>
       <td><code>${escHtml(e.agent_id||'—')}</code></td>
-      <td>${escHtml(e.user||'—')}</td>
+      <td style="color:var(--text-muted)">${escHtml(e.user||'—')}</td>
       <td>${escHtml(e.event_type)}</td>
       <td>${sevBadge(e.severity)}</td>
-      <td class="text-muted text-truncate" style="max-width:220px" title="${escHtml(e.details||'')}">${escHtml(shortDetails(e.details))}</td>
+      <td class="text-truncate-cell" style="color:var(--text-muted)" title="${escHtml(e.details||'')}">${escHtml(shortDetails(e.details))}</td>
     </tr>`).join('');
 }
 
 function renderAgents(agents) {
   const grid = document.getElementById('agentsGrid');
-  if (!agents.length) { grid.innerHTML = '<div class="col-12 text-muted">Агентов нет</div>'; return; }
-  grid.innerHTML = agents.map(a => `
-    <div class="col-sm-6 col-lg-4">
-      <div class="card agent-card shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start mb-2">
-            <h6 class="mb-0"><i class="bi bi-pc-display me-1"></i>${escHtml(a.hostname||a.agent_id)}</h6>
-            <span class="badge rounded-pill px-2 ${a.is_online?'online-badge':'offline-badge'}">
-              ${a.is_online?'Онлайн':'Офлайн'}
-            </span>
-          </div>
-          <div class="text-muted small">
-            <div><i class="bi bi-hash me-1"></i>${escHtml(a.agent_id)}</div>
-            <div><i class="bi bi-network-wired me-1"></i>${escHtml(a.ip_address||'—')}</div>
-            <div><i class="bi bi-windows me-1"></i>${escHtml(a.os_info||'—')}</div>
-            <div class="mt-1"><i class="bi bi-clock me-1"></i>${fmtTime(a.last_seen)}</div>
-          </div>
-        </div>
+  const online = agents.filter(a => a.is_online);
+  if (!online.length) { grid.innerHTML = '<div style="color:var(--text-muted)">Нет агентов онлайн</div>'; return; }
+  grid.innerHTML = online.map(a => `
+    <div class="agent-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div class="a-hostname"><i class="bi bi-pc-display me-2" style="color:var(--accent3)"></i>${escHtml(a.hostname||a.agent_id)}</div>
+        <span class="${a.is_online?'online-pill':'offline-pill'}">${a.is_online?'Онлайн':'Офлайн'}</span>
+      </div>
+      <div class="a-id mb-2">${escHtml(a.agent_id)}</div>
+      <div class="a-info">
+        <div><i class="bi bi-network-wired me-1"></i>${escHtml(a.ip_address||'—')}</div>
+        <div><i class="bi bi-windows me-1"></i>${escHtml(a.os_info||'—')}</div>
+        <div><i class="bi bi-clock me-1"></i>${fmtTime(a.last_seen)}</div>
       </div>
     </div>`).join('');
 }
@@ -939,23 +1314,22 @@ function renderAgents(agents) {
 function renderPrivileges(privs) {
   const tbody = document.getElementById('privBody');
   if (!privs.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Нет привилегий</td></tr>'; return;
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4" style="color:var(--text-muted)">Нет привилегий</td></tr>'; return;
   }
-  const yes = '<i class="bi bi-check-circle-fill text-success"></i>';
-  const no  = '<i class="bi bi-x-circle text-muted"></i>';
+  const yes = '<i class="bi bi-check-circle-fill" style="color:#34d399"></i>';
+  const no  = '<i class="bi bi-x-circle" style="color:var(--text-dim)"></i>';
   tbody.innerHTML = privs.map(p => `
     <tr>
       <td>${escHtml(p.username)}</td>
-      <td>${p.agent_id||'<span class="text-muted">все</span>'}</td>
+      <td>${p.agent_id||'<span style="color:var(--text-muted)">все</span>'}</td>
       <td class="text-center">${p.can_unlock_files?yes:no}</td>
       <td class="text-center">${p.can_view_pii?yes:no}</td>
-      <td>${escHtml(p.granted_by||'—')}</td>
-      <td>${fmtTime(p.granted_at)}</td>
+      <td style="color:var(--text-muted)">${escHtml(p.granted_by||'—')}</td>
+      <td style="color:var(--text-muted);font-size:.78rem">${fmtTime(p.granted_at)}</td>
     </tr>`).join('');
 }
 
 // ── Detail modal ──────────────────────────────────────────────────────────────
-
 function _detailRow(label, value, html = false) {
   if (!value && value !== 0) return '';
   return `<div class="detail-row">
@@ -972,27 +1346,27 @@ function _parseDetails(raw) {
 
 function _eventIcon(evType) {
   const map = {
-    'pii_detected':               'bi-file-earmark-person-fill text-warning',
-    'usb_pii_copy_blocked':       'bi-usb-drive-fill text-danger',
-    'usb_inserted':               'bi-usb-plug-fill text-primary',
-    'file_usb_copy_blocked':      'bi-usb-drive-fill text-danger',
-    'messenger_pii_send_blocked': 'bi-chat-fill text-danger',
-    'suspicious_process':         'bi-bug-fill text-danger',
-    'clipboard_block':            'bi-clipboard-x-fill text-danger',
-    'clipboard_pii':              'bi-clipboard-fill text-warning',
-    'file_access_granted':        'bi-unlock-fill text-success',
-    'file_opened_no_pii':         'bi-file-check-fill text-secondary',
-    'unauthorized_access_attempt':'bi-shield-x-fill text-danger',
-    'brute_force_attempt':        'bi-exclamation-octagon-fill text-danger',
-    'file_read':                  'bi-eye-fill text-secondary',
-    'file_modified':              'bi-pencil-fill text-warning',
-    'file_moved':                 'bi-arrow-left-right text-warning',
-    'file_modified_with_pii':     'bi-pencil-fill text-warning',
-    'file_deleted_with_pii':      'bi-trash3-fill text-danger',
-    'file_quarantined':           'bi-folder-x-fill text-warning',
-    'file_restored':              'bi-arrow-counterclockwise text-success',
+    'pii_detected':               'bi-file-earmark-person-fill',
+    'usb_pii_copy_blocked':       'bi-usb-drive-fill',
+    'usb_inserted':               'bi-usb-plug-fill',
+    'file_usb_copy_blocked':      'bi-usb-drive-fill',
+    'messenger_pii_send_blocked': 'bi-chat-fill',
+    'suspicious_process':         'bi-bug-fill',
+    'clipboard_block':            'bi-clipboard-x-fill',
+    'clipboard_pii':              'bi-clipboard-fill',
+    'file_access_granted':        'bi-unlock-fill',
+    'file_opened_no_pii':         'bi-file-check-fill',
+    'unauthorized_access_attempt':'bi-shield-x-fill',
+    'brute_force_attempt':        'bi-exclamation-octagon-fill',
+    'file_read':                  'bi-eye-fill',
+    'file_modified':              'bi-pencil-fill',
+    'file_moved':                 'bi-arrow-left-right',
+    'file_modified_with_pii':     'bi-pencil-fill',
+    'file_deleted_with_pii':      'bi-trash3-fill',
+    'file_quarantined':           'bi-folder-x-fill',
+    'file_restored':              'bi-arrow-counterclockwise',
   };
-  return map[evType] || 'bi-info-circle-fill text-secondary';
+  return map[evType] || 'bi-info-circle-fill';
 }
 
 function _buildEventBody(e) {
@@ -1002,22 +1376,21 @@ function _buildEventBody(e) {
   let threatBanner = '';
   if (e.severity === 'HIGH') {
     const isBrute   = e.event_type === 'brute_force_attempt';
-    const bTitle    = isBrute ? 'BRUTE FORCE ATTACK — УГРОЗА БЕЗОПАСНОСТИ' : 'УГРОЗА БЕЗОПАСНОСТИ';
+    const bTitle    = isBrute ? 'BRUTE FORCE ATTACK' : 'УГРОЗА БЕЗОПАСНОСТИ';
     const bDesc     = isBrute
       ? 'Многократные попытки несанкционированного доступа к файлу с ПД!'
       : 'Обнаружена критическая угроза. Требуется немедленное реагирование.';
     threatBanner = `
-      <div class="alert alert-danger d-flex align-items-center gap-3 mb-3 py-2">
-        <i class="bi bi-shield-exclamation fs-3 flex-shrink-0"></i>
-        <div><div class="fw-bold">${bTitle}</div><div class="small">${bDesc}</div></div>
+      <div class="high-alert-banner">
+        <i class="bi bi-shield-exclamation"></i>
+        <div><div style="font-weight:700;color:#f87171">${bTitle}</div><div style="font-size:.82rem;color:var(--text-muted)">${bDesc}</div></div>
       </div>`;
   }
 
   let piiSection = '';
   if (d.pii_types) {
     const types  = String(d.pii_types).split(',').filter(Boolean);
-    const colors = {IIN:'danger', PHONE:'primary', EMAIL:'info', FIO:'success', DOB:'warning'};
-    piiSection   = types.map(t => `<span class="badge bg-${colors[t.trim()]||'secondary'} me-1">${t.trim()}</span>`).join('');
+    piiSection   = types.map(t => `<span class="pii-tag pii-${t.trim()}">${t.trim()}</span>`).join('');
   }
 
   const isUsb = e.event_type.includes('usb') || d.drive || d.usb_drive;
@@ -1029,35 +1402,34 @@ function _buildEventBody(e) {
       ? '<span class="usb-block-badge"><i class="bi bi-shield-x me-1"></i>Заблокировано</span>'
       : '<span class="usb-allow-badge"><i class="bi bi-shield-check me-1"></i>Разрешено</span>';
     usb_section = `
-      <div class="alert alert-${isBlocked?'danger':'success'} py-2 mt-3 mb-0">
-        <div class="d-flex align-items-center gap-2">
-          <i class="bi bi-usb-drive-fill fs-5"></i>
+      <div class="usb-info-box">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="bi bi-usb-drive-fill" style="font-size:1.2rem;color:#f87171"></i>
           <div>
-            <div class="fw-semibold">USB-накопитель: ${escHtml(drive)}</div>
-            <div class="small mt-1">${blockedBadge}</div>
-            ${d.reason ? `<div class="small text-muted mt-1">${escHtml(d.reason)}</div>` : ''}
+            <div style="font-weight:600">USB-накопитель: ${escHtml(drive)}</div>
+            <div style="margin-top:4px">${blockedBadge}</div>
+            ${d.reason ? `<div style="font-size:.78rem;color:var(--text-muted);margin-top:4px">${escHtml(d.reason)}</div>` : ''}
           </div>
         </div>
       </div>`;
   }
 
-  // Screenshot section for HIGH events
   let scrSection = '';
   if (d.screenshot) {
     scrSection = `
-      <div class="mt-3">
-        <div class="fw-semibold small text-muted mb-1">СКРИНШОТ</div>
-        <img src="/screenshots/${escHtml(d.screenshot)}" class="img-fluid rounded border"
-             style="max-height:300px" onerror="this.style.display='none'"/>
+      <div style="margin-top:14px">
+        <div style="font-size:.72rem;font-weight:700;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase">Скриншот</div>
+        <img src="/screenshots/${escHtml(d.screenshot)}" style="max-width:100%;max-height:300px;border-radius:8px;border:1px solid var(--border)"
+             onerror="this.style.display='none'"/>
       </div>`;
   }
 
   return threatBanner + `
-    <div class="d-flex align-items-center gap-2 mb-3">
-      <i class="bi ${icon} fs-4"></i>
-      <div><div class="fw-bold fs-6">${escHtml(e.event_type)}</div><div>${sevBadge(e.severity)}</div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <i class="bi ${icon}" style="font-size:1.5rem;color:var(--accent2)"></i>
+      <div><div style="font-weight:700">${escHtml(e.event_type)}</div><div>${sevBadge(e.severity)}</div></div>
     </div>
-    <div class="border rounded p-3 bg-light">
+    <div class="detail-box">
       ${_detailRow('Время', fmtTime(e.timestamp))}
       ${_detailRow('Агент', e.agent_id)}
       ${_detailRow('Пользователь', e.user)}
@@ -1082,7 +1454,7 @@ function _buildAlertBody(a) {
   if (isUsb) {
     const m = (a.description||'').match(/файла?\s+([^\s]+)\s+на\s+USB\s+([^\s]+)/i);
     if (m) extra = `
-      <div class="alert alert-danger py-2 mt-3">
+      <div class="usb-info-box" style="margin-top:12px">
         <i class="bi bi-usb-drive-fill me-2"></i>
         <strong>USB:</strong> ${escHtml(m[2])} &nbsp;|&nbsp;
         <strong>Файл:</strong> ${escHtml(m[1])} &nbsp;|&nbsp;
@@ -1090,11 +1462,11 @@ function _buildAlertBody(a) {
       </div>`;
   }
   return `
-    <div class="d-flex align-items-center gap-2 mb-3">
-      <i class="bi bi-exclamation-triangle-fill text-danger fs-4"></i>
-      <div><div class="fw-bold fs-6">${escHtml(a.alert_type)}</div><div>${sevBadge(a.severity)}</div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <i class="bi bi-exclamation-triangle-fill" style="font-size:1.5rem;color:#f87171"></i>
+      <div><div style="font-weight:700">${escHtml(a.alert_type)}</div><div>${sevBadge(a.severity)}</div></div>
     </div>
-    <div class="border rounded p-3 bg-light">
+    <div class="detail-box">
       ${_detailRow('Время', fmtTime(a.timestamp))}
       ${_detailRow('Агент', a.agent_id)}
       ${_detailRow('Тип алерта', a.alert_type)}
@@ -1148,9 +1520,14 @@ async function resolveAlert(id) {
 
 function filterEvents(sev) {
   currentSevFilter = sev;
-  ['evAll','evHigh','evMed','evLow'].forEach(id => document.getElementById(id).classList.remove('active'));
-  const map = {'':'evAll','HIGH':'evHigh','MEDIUM':'evMed','LOW':'evLow'};
-  document.getElementById(map[sev]).classList.add('active');
+  ['evAll','evHigh','evMed','evLow'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'filter-btn';
+  });
+  const classMap = {'':'active-all','HIGH':'active-high','MEDIUM':'active-med','LOW':'active-low'};
+  const idMap    = {'':'evAll','HIGH':'evHigh','MEDIUM':'evMed','LOW':'evLow'};
+  const target   = document.getElementById(idMap[sev]);
+  if (target) target.classList.add(classMap[sev]);
   renderEvents(allEvents.filter(e => !sev || e.severity === sev));
 }
 
@@ -1162,18 +1539,18 @@ async function grantPrivilege() {
     can_unlock_files: document.getElementById('privUnlock').checked,
     can_view_pii:    document.getElementById('privViewPii').checked,
   };
-  if (!payload.username) { msg.innerHTML = '<span class="text-danger">Укажите пользователя</span>'; return; }
+  if (!payload.username) { msg.innerHTML = '<span style="color:#f87171">Укажите пользователя</span>'; return; }
   const r = await fetch('/privileges', {
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
     body: JSON.stringify(payload),
   });
   if (r.ok) {
-    msg.innerHTML = '<span class="text-success">Привилегия выдана</span>';
+    msg.innerHTML = '<span style="color:#34d399">Привилегия выдана</span>';
     await loadPrivileges();
   } else {
     const err = await r.json().catch(()=>({}));
-    msg.innerHTML = `<span class="text-danger">${escHtml(err.detail||'Ошибка')}</span>`;
+    msg.innerHTML = `<span style="color:#f87171">${escHtml(err.detail||'Ошибка')}</span>`;
   }
 }
 
@@ -1211,11 +1588,9 @@ function handleWSMessage(msg) {
     loadAgents();
   } else if (msg.type === 'quarantine_update' || msg.type === 'quarantine_restored' || msg.type === 'quarantine_deleted') {
     loadPiiCount();
-    const qTab = document.getElementById('tabQuarantine');
-    if (qTab && qTab.classList.contains('show')) loadQuarantine();
+    if (_activeTab === 'tabQuarantine') loadQuarantine();
   } else if (msg.type === 'pd_files_update') {
-    const pdTab = document.getElementById('tabPdFiles');
-    if (pdTab && pdTab.classList.contains('show')) loadPdFiles();
+    if (_activeTab === 'tabPdFiles') loadPdFiles();
   } else if (msg.type === 'alert_resolved') {
     const found = allAlerts.find(a => a.id===msg.id);
     if (found) found.is_resolved = true;
@@ -1226,19 +1601,21 @@ function handleWSMessage(msg) {
 
 function flashHighAlert(msg) {
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;min-width:340px;';
+  toast.className = 'toast-item t-danger';
+  toast.style.cssText = 'min-width:300px;display:flex;flex-direction:column;gap:6px';
   toast.innerHTML = `
-    <div class="alert alert-danger alert-dismissible shadow" role="alert">
-      <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>HIGH алерт</strong><br>
-      <small>${escHtml(msg.description||msg.alert_type)}</small><br>
-      <button class="btn btn-sm btn-outline-light mt-1"
-              onclick="showAlertDetail(${msg.id});this.closest('div.alert').parentElement.remove()">
-        <i class="bi bi-eye me-1"></i>Подробнее
-      </button>
-      <button type="button" class="btn-close btn-close-white" onclick="this.parentElement.parentElement.remove()"></button>
-    </div>`;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove && toast.remove(), 10000);
+    <div style="display:flex;align-items:center;gap:8px">
+      <i class="bi bi-exclamation-triangle-fill" style="color:#f87171;font-size:1.1rem"></i>
+      <strong>HIGH алерт — ${escHtml(msg.agent_id||'')}</strong>
+    </div>
+    <div style="font-size:.8rem;color:var(--text-muted)">${escHtml(msg.description||msg.alert_type)}</div>
+    <button class="btn-danger-dark" style="width:fit-content;font-size:.75rem"
+            onclick="showAlertDetail(${msg.id});this.closest('.toast-item').remove()">
+      <i class="bi bi-eye me-1"></i>Подробнее
+    </button>`;
+  const container = document.getElementById('toastContainer');
+  container.appendChild(toast);
+  setTimeout(() => toast.remove && toast.remove(), 12000);
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────────

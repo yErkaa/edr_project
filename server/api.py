@@ -184,6 +184,32 @@ async def startup():
             await db.commit()
             logger.info("Создан пользователь admin по умолчанию")
 
+    # Fix orphaned PDFiles: is_blocked=True but no QuarantineFile record
+    async with AsyncSessionLocal() as db:
+        blocked_q = await db.execute(
+            select(PDFile).where(PDFile.is_blocked == True)  # noqa: E712
+        )
+        for pd_file in blocked_q.scalars().all():
+            existing = await db.execute(
+                select(QuarantineFile).where(
+                    QuarantineFile.agent_id == pd_file.agent_id,
+                    QuarantineFile.original_path == pd_file.file_path,
+                    QuarantineFile.is_restored == False,  # noqa: E712
+                )
+            )
+            if not existing.scalars().first():
+                qf = QuarantineFile(
+                    agent_id=pd_file.agent_id,
+                    original_path=pd_file.file_path,
+                    quarantine_path="",
+                    filename=pd_file.file_name,
+                    pii_types=pd_file.pii_types,
+                    confidence=pd_file.confidence,
+                )
+                db.add(qf)
+                logger.info(f"Migration: created QuarantineFile for orphaned {pd_file.file_name}")
+        await db.commit()
+
     logger.info("EDR Server готов к работе")
 
 
@@ -224,6 +250,11 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
 
 class AgentRegisterIn(BaseModel):
     agent_id: str
@@ -286,6 +317,22 @@ async def login(
         raise HTTPException(status_code=400, detail="Неверный логин или пароль")
     logger.info(f"Успешный вход: {form.username}")
     return {"access_token": _create_token(user.username), "token_type": "bearer"}
+
+
+@app.post("/auth/change-password")
+async def change_password(
+    data: ChangePasswordIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Новый пароль слишком короткий (минимум 6 символов)")
+    current_user.hashed_password = _hash_password(data.new_password)
+    await db.commit()
+    logger.info(f"Пароль изменён: {current_user.username}")
+    return {"status": "ok"}
 
 
 # ── Endpoints: Agents ─────────────────────────────────────────────────────────
@@ -1080,22 +1127,29 @@ async def quarantine_done(
     pd_file.pending_quarantine = False
     if data.success:
         pd_file.is_blocked = True
-        if data.quarantine_path:
-            # Only create a new QuarantineFile record when agent actually moved the file.
-            # Empty quarantine_path means file was already a stub (pre-existing quarantine) —
-            # a QuarantineFile record already exists from the old automatic flow.
+        # Always create/update QuarantineFile so the quarantine tab shows the file.
+        existing = await db.execute(
+            select(QuarantineFile).where(
+                QuarantineFile.agent_id == pd_file.agent_id,
+                QuarantineFile.original_path == pd_file.file_path,
+                QuarantineFile.is_restored == False,  # noqa: E712
+            )
+        )
+        qf_existing = existing.scalars().first()
+        if qf_existing:
+            if data.quarantine_path:
+                qf_existing.quarantine_path = data.quarantine_path
+        else:
             qf = QuarantineFile(
                 agent_id=pd_file.agent_id,
                 original_path=pd_file.file_path,
-                quarantine_path=data.quarantine_path,
+                quarantine_path=data.quarantine_path or "",
                 filename=pd_file.file_name,
                 pii_types=pd_file.pii_types,
                 confidence=pd_file.confidence,
             )
             db.add(qf)
-            logger.info(f"Файл в карантине: {pd_file.file_name}")
-        else:
-            logger.info(f"Файл уже был в карантине (заглушка): {pd_file.file_name}")
+        logger.info(f"Файл в карантине: {pd_file.file_name} path={data.quarantine_path!r}")
 
     await db.commit()
     if data.success:

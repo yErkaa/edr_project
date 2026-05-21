@@ -706,15 +706,17 @@ async function loadQuarantine() {
 }
 
 async function restoreFile(id, fname) {
-  const pw = prompt(`Введите пароль администратора для восстановления файла:\n${fname}`);
-  if (pw === null) return;
+  if (!confirm(`Восстановить файл из карантина?\n\n${fname}\n\nФайл будет возвращён на исходное место на компьютере ученика.`)) return;
   const r = await fetch(`/quarantine/${id}/restore`, {
     method: 'POST',
     headers: {'Content-Type':'application/json','Authorization':`Bearer ${TOKEN}`},
-    body: JSON.stringify({admin_password: pw}),
+    body: JSON.stringify({}),
   });
   if (r.ok) {
-    await loadQuarantine(); await loadPiiCount();
+    showToast('Команда восстановления отправлена агенту. Файл появится через несколько секунд...', 'info');
+    await loadQuarantine();
+    // Агент восстанавливает файл асинхронно — обновляем таблицу через 8 сек
+    setTimeout(async () => { await loadQuarantine(); await loadPdFiles(); await loadPiiCount(); }, 8000);
   } else {
     const err = await r.json().catch(()=>({}));
     alert('Ошибка: ' + (err.detail || 'не удалось восстановить'));
@@ -1209,6 +1211,9 @@ function handleWSMessage(msg) {
     loadPiiCount();
     const qTab = document.getElementById('tabQuarantine');
     if (qTab && qTab.classList.contains('show')) loadQuarantine();
+  } else if (msg.type === 'pd_files_update') {
+    const pdTab = document.getElementById('tabPdFiles');
+    if (pdTab && pdTab.classList.contains('show')) loadPdFiles();
   } else if (msg.type === 'alert_resolved') {
     const found = allAlerts.find(a => a.id===msg.id);
     if (found) found.is_resolved = true;

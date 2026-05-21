@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 import bcrypt as _bcrypt
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, desc, func, select
+from sqlalchemy import Date, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -600,7 +600,8 @@ async def pending_restore(
     """Агент спрашивает: есть ли файлы для восстановления?"""
     result = await db.execute(
         select(QuarantineFile).where(
-            QuarantineFile.agent_id == agent_id,
+            # Включаем файлы этого агента + файлы без agent_id (старые записи)
+            or_(QuarantineFile.agent_id == agent_id, QuarantineFile.agent_id.is_(None)),
             QuarantineFile.pending_restore == True,  # noqa: E712
             QuarantineFile.is_restored == False,      # noqa: E712
         )
@@ -627,8 +628,17 @@ async def restore_done(
     if data.get("success"):
         qf.is_restored = True
         logger.info(f"Файл восстановлен агентом: {qf.filename}")
+        # Сбросить флаг is_blocked в PDFile, чтобы файл снова появился как активный
+        pd_result = await db.execute(
+            select(PDFile).where(PDFile.file_path == qf.original_path)
+        )
+        pd_file = pd_result.scalar_one_or_none()
+        if pd_file:
+            pd_file.is_blocked = False
+            pd_file.pending_quarantine = False
     await db.commit()
     await manager.broadcast({"type": "quarantine_restored", "id": file_id})
+    await manager.broadcast({"type": "pd_files_update"})
     return {"status": "ok"}
 
 

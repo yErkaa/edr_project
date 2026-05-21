@@ -577,10 +577,17 @@ class Agent:
                 return
             for item in r.json():
                 fid = item["id"]
+                qpath = item["quarantine_path"]
+                opath = item["original_path"]
                 from quarantine import restore_file
-                ok = restore_file(item["quarantine_path"], item["original_path"])
+                ok = restore_file(qpath, opath)
                 if ok:
-                    logger.info(f"Файл восстановлен: {item['original_path']}")
+                    logger.info(f"Файл восстановлен: {opath}")
+                elif not os.path.isfile(qpath):
+                    # Файл карантина не существует — помечаем как "восстановлен"
+                    # чтобы не блокировать очередь навсегда
+                    logger.warning(f"Файл карантина не найден, пропускаем: {qpath}")
+                    ok = True
                 try:
                     requests.post(
                         f"{SERVER_BASE}/quarantine/{fid}/restore-done",

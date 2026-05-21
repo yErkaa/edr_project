@@ -186,6 +186,8 @@ class DirectoryWatcher:
         self._usb_callback: Callable | None = None
         # Cross-dir move tracking: basename → (src_path, monotonic_time)
         self._recent_moves_out: dict[str, tuple[str, float]] = {}
+        # Paths recently restored — suppress watcher events for them temporarily
+        self._restore_suppressed: set[str] = set()
 
         self.paths = []
         for p in paths:
@@ -213,6 +215,19 @@ class DirectoryWatcher:
     def add_known_pii(self, path: str):
         with self._lock:
             self._pii_files.add(os.path.abspath(path))
+
+    def suppress_restore_path(self, path: str, duration: float = 20.0):
+        """Подавить события вотчера для path на duration секунд (вызывается после restore)."""
+        path = os.path.abspath(path)
+        with self._lock:
+            self._restore_suppressed.add(path)
+
+        def _remove():
+            time.sleep(duration)
+            with self._lock:
+                self._restore_suppressed.discard(path)
+
+        threading.Thread(target=_remove, daemon=True).start()
 
     def add_usb_path(self, path: str, usb_callback: Callable | None = None):
         path = os.path.abspath(path)
@@ -377,6 +392,9 @@ class DirectoryWatcher:
             return
         if is_quarantine_stub(path):
             return  # our own stub
+        with self._lock:
+            if path in self._restore_suppressed:
+                return  # только что восстановлен — не генерируем события
 
         # Cache mtime now so spurious _on_modified events are suppressed
         try:
@@ -443,6 +461,9 @@ class DirectoryWatcher:
     def _on_modified(self, path: str):
         if is_quarantine_stub(path):
             return
+        with self._lock:
+            if path in self._restore_suppressed:
+                return  # только что восстановлен — не генерируем события
 
         # Проверяем что файл реально изменился (mtime), а не просто был прочитан
         try:

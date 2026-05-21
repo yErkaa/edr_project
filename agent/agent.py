@@ -580,14 +580,15 @@ class Agent:
                 qpath = item["quarantine_path"]
                 opath = item["original_path"]
                 from quarantine import restore_file
+                # Подавляем события вотчера для этого пути на 20 сек,
+                # чтобы восстановленный файл не породил HIGH-алерт
+                if self.dir_watcher:
+                    self.dir_watcher.suppress_restore_path(opath)
                 ok = restore_file(qpath, opath)
                 if ok:
                     logger.info(f"Файл восстановлен: {opath}")
-                elif not os.path.isfile(qpath):
-                    # Файл карантина не существует — помечаем как "восстановлен"
-                    # чтобы не блокировать очередь навсегда
-                    logger.warning(f"Файл карантина не найден, пропускаем: {qpath}")
-                    ok = True
+                else:
+                    logger.warning(f"Не удалось восстановить: {qpath}")
                 try:
                     requests.post(
                         f"{SERVER_BASE}/quarantine/{fid}/restore-done",

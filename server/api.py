@@ -632,7 +632,7 @@ async def restore_done(
         pd_result = await db.execute(
             select(PDFile).where(PDFile.file_path == qf.original_path)
         )
-        pd_file = pd_result.scalar_one_or_none()
+        pd_file = pd_result.scalars().first()
         if pd_file:
             pd_file.is_blocked = False
             pd_file.pending_quarantine = False

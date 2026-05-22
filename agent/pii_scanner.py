@@ -44,7 +44,10 @@ _TEXT_EXTS = {".txt", ".csv", ".log", ".json", ".xml", ".tsv", ".md"}
 # Office extensions scanned via their respective libraries
 _OFFICE_EXTS = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf"}
 
-_SUPPORTED_EXTS = _TEXT_EXTS | _OFFICE_EXTS
+# Image extensions scanned via OCR (pytesseract + Pillow)
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
+
+_SUPPORTED_EXTS = _TEXT_EXTS | _OFFICE_EXTS | _IMAGE_EXTS
 
 
 # ── Checksum validation ───────────────────────────────────────────────────────
@@ -124,6 +127,30 @@ def _extract_spacy_persons(text: str) -> list:
 
 # ── Office text extraction ────────────────────────────────────────────────────
 
+def _extract_image_ocr(path: str) -> str:
+    """OCR для изображений (.jpg, .png, .bmp и т.п.).
+    Требует: pip install pytesseract Pillow
+             + установленный Tesseract OCR с языками rus и kaz.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+    try:
+        img = Image.open(path).convert("RGB")
+        for lang in ("rus+kaz", "rus", "eng"):
+            try:
+                text = pytesseract.image_to_string(img, lang=lang, timeout=60)
+                if text.strip():
+                    return text
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
 def _extract_pdf_ocr(path: str) -> str:
     """OCR для PDF-сканов (фото удостоверений и т.п.).
     Требует: pip install PyMuPDF pytesseract Pillow
@@ -173,6 +200,9 @@ def _cell_str(value) -> str:
 def _extract_text(path: str, ext: str) -> str:
     """Return plain text from a file regardless of format."""
     try:
+        if ext in _IMAGE_EXTS:
+            return _extract_image_ocr(path)
+
         if ext in (".docx", ".doc"):
             from docx import Document
             doc   = Document(path)
@@ -319,7 +349,7 @@ class PIIScanner:
         return True, confidence, found_types
 
     def scan_file(self, path: str, timeout: float = 30.0) -> tuple:
-        """Return (is_pii, confidence, pii_types). Supports text and Office formats."""
+        """Return (is_pii, confidence, pii_types). Supports text, Office, PDF and image formats."""
         import concurrent.futures
 
         if not os.path.isfile(path):
@@ -336,6 +366,9 @@ class PIIScanner:
         except Exception:
             return False, 0.0, []
 
+        # OCR-heavy files need more time: images and scanned PDFs
+        effective_timeout = 120.0 if ext in (_IMAGE_EXTS | {".pdf"}) else timeout
+
         def _do_scan():
             if ext in _TEXT_EXTS:
                 content = ""
@@ -347,7 +380,7 @@ class PIIScanner:
                     except (UnicodeDecodeError, LookupError):
                         continue
                 return self.scan_text(content)
-            # Office / PDF
+            # Office / PDF / Image
             try:
                 content = _extract_text(path, ext)
                 return self.scan_text(content)
@@ -357,10 +390,10 @@ class PIIScanner:
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         fut = ex.submit(_do_scan)
         try:
-            return fut.result(timeout=timeout)
+            return fut.result(timeout=effective_timeout)
         except concurrent.futures.TimeoutError:
             return False, 0.0, []
         except Exception:
             return False, 0.0, []
         finally:
-            ex.shutdown(wait=False)  # don't block on hung PDF threads
+            ex.shutdown(wait=False)  # don't block on hung PDF/OCR threads

@@ -1,6 +1,15 @@
 import os
 import re
 
+# Tell pytesseract where to find the Tesseract binary on Windows
+try:
+    import pytesseract as _tess_check
+    _TESS_EXE = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.isfile(_TESS_EXE):
+        _tess_check.pytesseract.tesseract_cmd = _TESS_EXE
+except Exception:
+    pass
+
 # ── Regex patterns ────────────────────────────────────────────────────────────
 
 # HIGH-level PII ──────────────────────────────────────────────────────────────

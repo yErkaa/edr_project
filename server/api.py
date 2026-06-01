@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 import bcrypt as _bcrypt
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, desc, func, or_, select
+from sqlalchemy import Date, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -214,6 +214,12 @@ async def startup():
                 db.add(qf)
                 logger.info(f"Migration: created QuarantineFile for orphaned {pd_file.file_name}")
         await db.commit()
+
+    # При старте сервера все агенты офлайн — они сами придут и зарегистрируются
+    async with AsyncSessionLocal() as db:
+        await db.execute(update(AgentModel).values(is_online=False))
+        await db.commit()
+        logger.info("Все агенты помечены офлайн до первого heartbeat")
 
     logger.info("EDR Server готов к работе")
     asyncio.create_task(_offline_watchdog())

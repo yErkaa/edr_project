@@ -20,13 +20,27 @@ import time
 from datetime import datetime
 from typing import Callable
 
+from pii_scanner import HIGH_PII_TYPES as _HIGH_PII_TYPES
+
+
+def _pii_sev(pii_types: list, confidence: float) -> str:
+    unique = set(pii_types)
+    if unique & _HIGH_PII_TYPES:          # IIN / CARD / DOC_NUM → всегда HIGH
+        return "HIGH"
+    if len(unique) >= 2:                   # 2+ мягких типа (телефон+ФИО, почта+ФИО...) → MEDIUM
+        return "MEDIUM"
+    return "LOW"                           # один мягкий тип или ничего → LOW
+
 import win32con
 import win32file
 
 logger = logging.getLogger("edr.quarantine")
 
 QUARANTINE_DIR  = r"C:\EDR_Quarantine"
-QUARANTINE_EXTS = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".txt", ".pdf"}
+QUARANTINE_EXTS = {
+    ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".txt", ".pdf",
+    ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif",
+}
 
 # Keep this alias so agent.py can import PROTECTED_EXTS from quarantine
 PROTECTED_EXTS = QUARANTINE_EXTS
@@ -129,6 +143,17 @@ def restore_file(quarantine_path: str, original_path: str) -> bool:
 
         os.makedirs(os.path.dirname(os.path.abspath(original_path)), exist_ok=True)
         shutil.move(quarantine_path, original_path)
+
+        # Reset ACL — quarantine dir has DENY EVERYONE, file may inherit those rights
+        try:
+            import subprocess
+            subprocess.run(
+                ["icacls", original_path, "/reset"],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+
         logger.info(f"Restored: {quarantine_path} → {original_path}")
         return True
     except Exception as e:
@@ -170,10 +195,13 @@ class DirectoryWatcher:
         self._quarantining: set[str] = set()   # paths currently being moved
         self._lock                = threading.Lock()
         self._dedup: dict[str, float] = {}
+        self._mtime_cache: dict[str, float] = {}
         self._usb_paths: set[str] = set()
         self._usb_callback: Callable | None = None
         # Cross-dir move tracking: basename → (src_path, monotonic_time)
         self._recent_moves_out: dict[str, tuple[str, float]] = {}
+        # Paths recently restored — suppress watcher events for them temporarily
+        self._restore_suppressed: set[str] = set()
 
         self.paths = []
         for p in paths:
@@ -201,6 +229,19 @@ class DirectoryWatcher:
     def add_known_pii(self, path: str):
         with self._lock:
             self._pii_files.add(os.path.abspath(path))
+
+    def suppress_restore_path(self, path: str, duration: float = 20.0):
+        """Подавить события вотчера для path на duration секунд (вызывается после restore)."""
+        path = os.path.abspath(path)
+        with self._lock:
+            self._restore_suppressed.add(path)
+
+        def _remove():
+            time.sleep(duration)
+            with self._lock:
+                self._restore_suppressed.discard(path)
+
+        threading.Thread(target=_remove, daemon=True).start()
 
     def add_usb_path(self, path: str, usb_callback: Callable | None = None):
         path = os.path.abspath(path)
@@ -339,12 +380,43 @@ class DirectoryWatcher:
 
     # ── Handlers ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _wait_ready(path: str, max_wait: float = 5.0) -> bool:
+        """Wait until file size stops changing (write complete). Returns False if file vanishes."""
+        step, prev, stable = 0.3, -1, 0
+        elapsed = 0.0
+        while elapsed < max_wait:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                return False
+            if size > 0 and size == prev:
+                stable += 1
+                if stable >= 2:   # stable for 2 consecutive checks (~0.6 s)
+                    return True
+            else:
+                stable = 0
+            prev = size
+            time.sleep(step)
+            elapsed += step
+        return os.path.isfile(path)
+
     def _on_created(self, path: str):
-        time.sleep(0.5)
-        if not os.path.isfile(path):
+        if not self._wait_ready(path):
             return
         if is_quarantine_stub(path):
             return  # our own stub
+        with self._lock:
+            if path in self._restore_suppressed:
+                return  # только что восстановлен — не генерируем события
+
+        # Cache mtime now so spurious _on_modified events are suppressed
+        try:
+            mtime = os.path.getmtime(path)
+            with self._lock:
+                self._mtime_cache[path] = mtime
+        except Exception:
+            pass
 
         # Cross-dir move detection: if a file with this basename recently left another
         # watched dir via RENAMED_OLD, treat this ADDED event as a move.
@@ -371,6 +443,10 @@ class DirectoryWatcher:
 
         if usb_root and cb:
             logger.warning(f"PII on USB: {path}")
+            # Добавляем в _quarantining до вызова cb, чтобы последующее DELETE-событие
+            # (от os.remove внутри on_usb_pii_event) не порождало file_deleted_with_pii.
+            with self._lock:
+                self._quarantining.add(path)
             cb(path)
             return
 
@@ -378,7 +454,7 @@ class DirectoryWatcher:
             self._pii_files.add(path)
 
         extra = {"confidence": confidence, "pii_types": ",".join(pii_types)}
-        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+        severity = _pii_sev(pii_types, confidence)
         self.callback(path, "pii_detected", severity, extra)
 
         if self.quarantine_on_detect:
@@ -399,9 +475,22 @@ class DirectoryWatcher:
     def _on_modified(self, path: str):
         if is_quarantine_stub(path):
             return
+        with self._lock:
+            if path in self._restore_suppressed:
+                return  # только что восстановлен — не генерируем события
 
+        # Проверяем что файл реально изменился (mtime), а не просто был прочитан
+        try:
+            mtime = os.path.getmtime(path)
+        except Exception:
+            return
         with self._lock:
             known = path in self._pii_files
+            last_mtime = self._mtime_cache.get(path, 0.0)
+        if mtime <= last_mtime:
+            return  # файл не менялся — ложное событие от Windows при копировании
+        with self._lock:
+            self._mtime_cache[path] = mtime
 
         if not known:
             if not os.path.isfile(path):
@@ -412,13 +501,31 @@ class DirectoryWatcher:
                 return
             if not is_pii or confidence < 0.15:
                 return
-            with self._lock:
-                self._pii_files.add(path)
             extra    = {"confidence": confidence, "pii_types": ",".join(pii_types)}
-            severity = "MEDIUM" if confidence > 0.50 else "LOW"
+            severity = _pii_sev(pii_types, confidence)
         else:
             extra    = {}
-            severity = "MEDIUM"  # known PII file implies high confidence
+            severity = "MEDIUM"
+
+        # USB-проверка: если файл на флешке — передать USB-callback вместо file_modified.
+        # Так же добавляем в _quarantining, чтобы последующее DELETE не стало false-alarm.
+        path_lower = path.lower()
+        with self._lock:
+            usb_root = next(
+                (u for u in self._usb_paths if path_lower.startswith(u.lower())), None
+            )
+            cb = self._usb_callback if usb_root else None
+            already_handled = path in self._quarantining
+
+        if usb_root and cb and not already_handled:
+            with self._lock:
+                self._quarantining.add(path)
+            cb(path)
+            return
+
+        if not known:
+            with self._lock:
+                self._pii_files.add(path)
 
         self.callback(path, "file_modified", severity, extra)
 
@@ -479,7 +586,7 @@ class DirectoryWatcher:
         with self._lock:
             self._pii_files.add(dest)
 
-        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+        severity = _pii_sev(pii_types, confidence)
         extra = {"confidence": confidence, "pii_types": ",".join(pii_types), "from": src}
         self.callback(dest, "file_moved", severity, extra)
 

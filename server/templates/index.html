@@ -658,8 +658,47 @@
             <div class="dark-card">
               <div class="dark-card-header">
                 <span><i class="bi bi-file-earmark-person-fill me-2" style="color:#fbbf24"></i>Файлы с персональными данными</span>
-                <button class="btn-dark-outline" onclick="loadPdFiles()"><i class="bi bi-arrow-clockwise"></i></button>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <div style="position:relative">
+                    <i class="bi bi-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:.8rem;pointer-events:none"></i>
+                    <input id="pdFilterInput" type="text" class="dark-input"
+                      placeholder="Поиск по списку..."
+                      style="padding-left:28px;width:200px;height:32px;font-size:.8rem"
+                      oninput="filterPdFiles()"/>
+                  </div>
+                  <button class="btn-dark-outline" onclick="loadPdFiles()" title="Обновить"><i class="bi bi-arrow-clockwise"></i></button>
+                  <button class="btn-dark-outline" onclick="toggleScanPanel()" id="scanPanelToggle" title="Найти и сканировать файл на дисках агента" style="white-space:nowrap">
+                    <i class="bi bi-hdd-fill me-1"></i>Поиск на дисках
+                  </button>
+                </div>
               </div>
+
+              <!-- Панель поиска на дисках (скрыта по умолчанию) -->
+              <div id="scanPanel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:rgba(124,58,237,.06)">
+                <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:10px">
+                  <i class="bi bi-info-circle me-1"></i>Агент найдёт файл на дисках C: и D: и проверит наличие персональных данных
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+                  <div style="flex:1;min-width:220px">
+                    <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:4px">Название файла (полное или частичное)</label>
+                    <input id="scanFilePath" type="text" class="dark-input"
+                      placeholder="удостоверение.pdf  или  53251eba"
+                      style="height:36px"
+                      onkeydown="if(event.key==='Enter')scanFile()"/>
+                  </div>
+                  <div style="min-width:150px">
+                    <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:4px">Агент</label>
+                    <select id="scanAgentSelect" class="dark-input" style="width:100%;height:36px">
+                      <option value="">Загрузка...</option>
+                    </select>
+                  </div>
+                  <button class="btn-accent" id="scanFileBtn" onclick="scanFile()" style="white-space:nowrap;height:36px">
+                    <i class="bi bi-search me-1"></i>Сканировать
+                  </button>
+                </div>
+                <div id="scanFileStatus" style="margin-top:10px;font-size:.82rem;display:none"></div>
+              </div>
+
               <div class="dark-card-body">
                 <table class="dark-table">
                   <thead>
@@ -948,12 +987,26 @@ async function loadEvents() {
   renderEvents(allEvents.filter(e => !currentSevFilter || e.severity === currentSevFilter));
 }
 
+let _allAgents = [];
+
 async function loadAgents() {
   const data = await apiFetch('/agents');
   if (!data) return;
+  _allAgents = data;
   const online = data.filter(a => a.is_online).length;
   document.getElementById('statAgents').textContent = online;
   renderAgents(data);
+  _populateScanAgentSelect(data);
+}
+
+function _populateScanAgentSelect(agents) {
+  const sel = document.getElementById('scanAgentSelect');
+  if (!sel) return;
+  const all = agents.filter(a => a.is_online);
+  if (!all.length) { sel.innerHTML = '<option value="">Нет агентов онлайн</option>'; return; }
+  sel.innerHTML = all.map(a =>
+    `<option value="${escHtml(a.agent_id)}">${escHtml(a.agent_id)} (${escHtml(a.hostname||a.agent_id)})</option>`
+  ).join('');
 }
 
 async function loadPrivileges() {
@@ -967,13 +1020,44 @@ async function loadPiiCount() {
   if (data) document.getElementById('statPii').textContent = data.count;
 }
 
+let _allPdFiles = [];
+
+function toggleScanPanel() {
+  const panel = document.getElementById('scanPanel');
+  const btn   = document.getElementById('scanPanelToggle');
+  const open  = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  btn.style.background = open ? 'rgba(124,58,237,.15)' : '';
+  btn.style.borderColor = open ? 'rgba(124,58,237,.4)' : '';
+  btn.style.color = open ? '#a78bfa' : '';
+}
+
+function filterPdFiles() {
+  const q = (document.getElementById('pdFilterInput').value || '').toLowerCase().trim();
+  const filtered = q ? _allPdFiles.filter(f =>
+    (f.file_name||'').toLowerCase().includes(q) ||
+    (f.file_path||'').toLowerCase().includes(q) ||
+    (f.pii_types||'').toLowerCase().includes(q) ||
+    (f.agent_id||'').toLowerCase().includes(q)
+  ) : _allPdFiles;
+  _renderPdRows(filtered);
+}
+
 async function loadPdFiles() {
   const data = await apiFetch('/pd-files');
   const tbody = document.getElementById('pdFilesBody');
   if (!data) { tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Ошибка загрузки</td></tr>'; return; }
-  const visible = data.filter(f => !f.is_blocked);
+  _allPdFiles = data.filter(f => !f.is_blocked);
+  filterPdFiles();
+}
+
+function _renderPdRows(visible) {
+  const tbody = document.getElementById('pdFilesBody');
   if (!visible.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Нет файлов с ПД</td></tr>';
+    const q = (document.getElementById('pdFilterInput').value || '').trim();
+    tbody.innerHTML = q
+      ? `<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Нет совпадений по запросу «${escHtml(q)}»</td></tr>`
+      : '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Нет файлов с ПД</td></tr>';
     return;
   }
   tbody.innerHTML = visible.map(f => {
@@ -1012,6 +1096,44 @@ async function loadPdFiles() {
       <td>${btn}</td>
     </tr>`;
   }).join('');
+}
+
+async function scanFile() {
+  const path    = document.getElementById('scanFilePath').value.trim();
+  const agentId = document.getElementById('scanAgentSelect').value;
+  const status  = document.getElementById('scanFileStatus');
+  const btn     = document.getElementById('scanFileBtn');
+
+  if (!path) { showToast('Укажите путь к файлу', 'warning'); return; }
+  if (!agentId) { showToast('Выберите агента', 'warning'); return; }
+
+  btn.disabled = true;
+  status.style.display = 'block';
+  status.style.color = 'var(--text-muted)';
+  status.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Отправка запроса агенту... (сканирование может занять до 2 минут для PDF/изображений)';
+
+  const r = await fetch('/scan-file', {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + localStorage.getItem('edr_token'), 'Content-Type': 'application/json'},
+    body: JSON.stringify({agent_id: agentId, file_name: path}),
+  });
+
+  if (!r.ok) {
+    status.style.color = '#f87171';
+    status.textContent = 'Ошибка: ' + (await r.text());
+    btn.disabled = false;
+    return;
+  }
+
+  status.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Агент ищет файл на дисках C: и D:...';
+  // Result arrives via WebSocket (scan_file_done). Re-enable after 3 min timeout.
+  setTimeout(() => {
+    btn.disabled = false;
+    if (status.innerHTML.includes('Агент сканирует')) {
+      status.style.color = 'var(--text-muted)';
+      status.textContent = 'Нет ответа от агента (возможно, агент офлайн)';
+    }
+  }, 180000);
 }
 
 async function requestQuarantine(id) {
@@ -1591,6 +1713,29 @@ function handleWSMessage(msg) {
     if (_activeTab === 'tabQuarantine') loadQuarantine();
   } else if (msg.type === 'pd_files_update') {
     if (_activeTab === 'tabPdFiles') loadPdFiles();
+  } else if (msg.type === 'scan_file_done') {
+    const status = document.getElementById('scanFileStatus');
+    const btn    = document.getElementById('scanFileBtn');
+    if (btn) btn.disabled = false;
+    if (status) {
+      status.style.display = 'block';
+      const fname = (msg.file_path||'').split(/[\\/]/).pop();
+      if (msg.found_count === 0) {
+        status.style.color = '#60a5fa';
+        status.innerHTML = '<i class="bi bi-search me-1"></i>Файл не найден ни на C: ни на D:';
+        showToast('Файл не найден на дисках агента', 'warning');
+      } else if (msg.is_pii) {
+        const types = (msg.pii_types||'').split(',').filter(Boolean).join(', ');
+        status.style.color = '#fbbf24';
+        status.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i><b>${escHtml(fname)}</b>: ПД обнаружены — ${escHtml(types)} (${Math.round((msg.confidence||0)*100)}%)`;
+        loadPdFiles();
+        showToast('ПД обнаружены: ' + escHtml(types), 'warning');
+      } else {
+        status.style.color = '#34d399';
+        status.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i><b>${escHtml(fname)}</b>: ПД не обнаружены`;
+        showToast('ПД не найдены в файле', 'success');
+      }
+    }
   } else if (msg.type === 'alert_resolved') {
     const found = allAlerts.find(a => a.id===msg.id);
     if (found) found.is_resolved = true;

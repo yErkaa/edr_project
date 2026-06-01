@@ -10,3 +10,7 @@ python-docx
 openpyxl
 python-pptx
 pdfplumber
+PyMuPDF
+pytesseract
+joblib
+scikit-learn

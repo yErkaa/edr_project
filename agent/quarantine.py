@@ -37,7 +37,10 @@ import win32file
 logger = logging.getLogger("edr.quarantine")
 
 QUARANTINE_DIR  = r"C:\EDR_Quarantine"
-QUARANTINE_EXTS = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".txt", ".pdf"}
+QUARANTINE_EXTS = {
+    ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".txt", ".pdf",
+    ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif",
+}
 
 # Keep this alias so agent.py can import PROTECTED_EXTS from quarantine
 PROTECTED_EXTS = QUARANTINE_EXTS

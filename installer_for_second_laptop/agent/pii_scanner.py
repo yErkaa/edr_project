@@ -1,9 +1,30 @@
 import os
 import re
 
+# Tell pytesseract where to find the Tesseract binary on Windows
+try:
+    import pytesseract as _tess_check
+    _TESS_EXE = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.isfile(_TESS_EXE):
+        _tess_check.pytesseract.tesseract_cmd = _TESS_EXE
+except Exception:
+    pass
+
 # ── Regex patterns ────────────────────────────────────────────────────────────
 
+# HIGH-level PII ──────────────────────────────────────────────────────────────
+
 _IIN_RE = re.compile(r"(?<!\d)(\d{12})(?!\d)")
+
+# Bank card: 16 digits in groups of 4, optionally separated by space/dash
+_CARD_RE = re.compile(r"\b(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})\b")
+
+# Kazakhstan passport number: 2 Latin letters + 7 digits (e.g. AB1234567)
+# Kazakhstan old ID card number: N + 8 digits (e.g. N12345678)
+_PASSPORT_RE = re.compile(r"\b[A-Z]{2}\d{7}\b")
+_IDCARD_RE   = re.compile(r"\bN\d{8}\b", re.IGNORECASE)
+
+# MEDIUM-level PII ────────────────────────────────────────────────────────────
 
 _PHONE_RE = re.compile(
     r"(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}"
@@ -23,16 +44,37 @@ _FIO_KZ_SUFFIX_RE = re.compile(
     r"\b[А-ЯЁ][а-яёА-ЯЁ]+\s+[А-ЯЁ][а-яёА-ЯЁ]+(?:улы|қызы|ұлы|қызы)\b"
 )
 
+# HIGH-level type names (used to compute severity in agent.py)
+HIGH_PII_TYPES = {"IIN", "CARD", "DOC_NUM"}
+
 # Plain-text extensions scanned directly
 _TEXT_EXTS = {".txt", ".csv", ".log", ".json", ".xml", ".tsv", ".md"}
 
 # Office extensions scanned via their respective libraries
 _OFFICE_EXTS = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf"}
 
-_SUPPORTED_EXTS = _TEXT_EXTS | _OFFICE_EXTS
+# Image extensions scanned via OCR (pytesseract + Pillow)
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
+
+_SUPPORTED_EXTS = _TEXT_EXTS | _OFFICE_EXTS | _IMAGE_EXTS
 
 
-# ── IIN checksum validation ───────────────────────────────────────────────────
+# ── Checksum validation ───────────────────────────────────────────────────────
+
+def _luhn_check(digits: str) -> bool:
+    """Validate a card number string using the Luhn algorithm."""
+    d = [int(c) for c in digits if c.isdigit()]
+    if len(d) != 16:
+        return False
+    total = 0
+    for i, v in enumerate(reversed(d)):
+        if i % 2 == 1:
+            v *= 2
+            if v > 9:
+                v -= 9
+        total += v
+    return total % 10 == 0
+
 
 def _validate_iin(iin_str: str) -> bool:
     if len(iin_str) != 12 or not iin_str.isdigit():
@@ -45,6 +87,33 @@ def _validate_iin(iin_str: str) -> bool:
     w2 = [3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 2]
     s2 = sum(d[i] * w2[i] for i in range(11)) % 11
     return d[11] == s2
+
+
+# ── ML model (optional) ──────────────────────────────────────────────────────
+
+_ML_THRESHOLD = 0.70  # minimum P(PII) to trust ML when regex finds nothing
+
+try:
+    import joblib as _joblib
+    _ML_DIR        = os.path.join(os.path.dirname(__file__), "..", "server", "ml_model")
+    _ml_vectorizer = _joblib.load(os.path.join(_ML_DIR, "vectorizer.pkl"))
+    _ml_model      = _joblib.load(os.path.join(_ML_DIR, "pii_model.pkl"))
+    _ML_AVAILABLE  = True
+except Exception:
+    _ml_vectorizer = None
+    _ml_model      = None
+    _ML_AVAILABLE  = False
+
+
+def _ml_predict(text: str) -> float:
+    """Return P(has PII) from the ML model, or 0.0 if unavailable."""
+    if not _ML_AVAILABLE:
+        return 0.0
+    try:
+        X = _ml_vectorizer.transform([text[:10_000]])
+        return float(_ml_model.predict_proba(X)[0][1])
+    except Exception:
+        return 0.0
 
 
 # ── spaCy (optional) ──────────────────────────────────────────────────────────
@@ -67,6 +136,69 @@ def _extract_spacy_persons(text: str) -> list:
 
 # ── Office text extraction ────────────────────────────────────────────────────
 
+def _extract_image_ocr(path: str) -> str:
+    """OCR для изображений (.jpg, .png, .bmp и т.п.).
+    Требует: pip install pytesseract Pillow
+             + установленный Tesseract OCR с языками rus и kaz.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+    try:
+        img = Image.open(path).convert("RGB")
+        for lang in ("rus+kaz", "rus", "eng"):
+            try:
+                text = pytesseract.image_to_string(img, lang=lang, timeout=60)
+                if text.strip():
+                    return text
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_pdf_ocr(path: str) -> str:
+    """OCR для PDF-сканов (фото удостоверений и т.п.).
+    Требует: pip install PyMuPDF pytesseract Pillow
+             + установленный Tesseract OCR с русским языковым пакетом.
+    Если библиотеки не установлены — молча возвращает пустую строку.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return ""
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+
+    parts = []
+    try:
+        doc = fitz.open(path)
+        for i in range(min(len(doc), 10)):   # OCR максимум 10 страниц
+            page = doc[i]
+            mat  = fitz.Matrix(2.0, 2.0)     # 200 DPI — лучше для OCR
+            pix  = page.get_pixmap(matrix=mat)
+            img  = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Пробуем русский + казахский, затем только русский, затем английский
+            for lang in ("rus+kaz", "rus", "eng"):
+                try:
+                    text = pytesseract.image_to_string(img, lang=lang, timeout=30)
+                    if text.strip():
+                        parts.append(text)
+                        break
+                except Exception:
+                    continue
+        doc.close()
+    except Exception:
+        pass
+    return "\n".join(parts)
+
+
 def _cell_str(value) -> str:
     """Convert a spreadsheet cell to string, preserving integer IINs."""
     if isinstance(value, float) and value == int(value):
@@ -77,6 +209,9 @@ def _cell_str(value) -> str:
 def _extract_text(path: str, ext: str) -> str:
     """Return plain text from a file regardless of format."""
     try:
+        if ext in _IMAGE_EXTS:
+            return _extract_image_ocr(path)
+
         if ext in (".docx", ".doc"):
             from docx import Document
             doc   = Document(path)
@@ -126,16 +261,28 @@ def _extract_text(path: str, ext: str) -> str:
             return "\n".join(parts)
 
         if ext == ".pdf":
-            import pdfplumber
-            parts = []
-            with pdfplumber.open(path) as pdf:
-                for page in pdf.pages[:30]:   # limit to first 30 pages
-                    t = page.extract_text()
-                    if t:
-                        parts.append(t)
-                        if len("\n".join(parts)) > 500_000:
-                            break
-            return "\n".join(parts)
+            # Шаг 1: извлечь текстовый слой (текстовые PDF)
+            text_parts = []
+            try:
+                import pdfplumber
+                with pdfplumber.open(path) as pdf:
+                    for page in pdf.pages[:30]:
+                        t = page.extract_text()
+                        if t:
+                            text_parts.append(t)
+                            if len("\n".join(text_parts)) > 500_000:
+                                break
+            except Exception:
+                pass
+            text = "\n".join(text_parts)
+
+            # Шаг 2: если текста мало (скан/фото) — OCR через PyMuPDF + pytesseract
+            if len(text.strip()) < 100:
+                ocr = _extract_pdf_ocr(path)
+                if ocr:
+                    text = ocr
+
+            return text
 
     except Exception:
         pass
@@ -152,13 +299,30 @@ def _extract_text(path: str, ext: str) -> str:
 
 class PIIScanner:
     def scan_text(self, text: str) -> tuple:
-        """Return (is_pii, confidence, pii_types)."""
+        """Return (is_pii, confidence, pii_types).
+
+        HIGH-level types: IIN, CARD, DOC_NUM
+        MEDIUM-level types: PHONE, EMAIL, FIO, DOB
+        """
         found_types: list = []
+
+        # ── HIGH-level PII ────────────────────────────────────────────────────
 
         for match in _IIN_RE.finditer(text):
             if _validate_iin(match.group(1)):
                 found_types.append("IIN")
                 break
+
+        for match in _CARD_RE.finditer(text):
+            digits = "".join(match.groups())
+            if _luhn_check(digits):
+                found_types.append("CARD")
+                break
+
+        if _PASSPORT_RE.search(text) or _IDCARD_RE.search(text):
+            found_types.append("DOC_NUM")
+
+        # ── MEDIUM-level PII ──────────────────────────────────────────────────
 
         if _PHONE_RE.search(text):
             found_types.append("PHONE")
@@ -176,14 +340,25 @@ class PIIScanner:
             found_types.append("FIO")
 
         if not found_types:
+            ml_prob = _ml_predict(text)
+            if ml_prob >= _ML_THRESHOLD:
+                return True, round(ml_prob, 2), ["ML_DETECTED"]
             return False, 0.0, []
 
-        weights    = {"IIN": 0.40, "PHONE": 0.20, "EMAIL": 0.15, "FIO": 0.15, "DOB": 0.10}
+        weights = {
+            "IIN":     0.50,
+            "CARD":    0.50,
+            "DOC_NUM": 0.40,
+            "PHONE":   0.20,
+            "EMAIL":   0.15,
+            "FIO":     0.15,
+            "DOB":     0.10,
+        }
         confidence = round(min(sum(weights.get(t, 0) for t in found_types), 1.0), 2)
         return True, confidence, found_types
 
     def scan_file(self, path: str, timeout: float = 30.0) -> tuple:
-        """Return (is_pii, confidence, pii_types). Supports text and Office formats."""
+        """Return (is_pii, confidence, pii_types). Supports text, Office, PDF and image formats."""
         import concurrent.futures
 
         if not os.path.isfile(path):
@@ -200,15 +375,21 @@ class PIIScanner:
         except Exception:
             return False, 0.0, []
 
+        # OCR-heavy files need more time: images and scanned PDFs
+        effective_timeout = 120.0 if ext in (_IMAGE_EXTS | {".pdf"}) else timeout
+
         def _do_scan():
             if ext in _TEXT_EXTS:
-                try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read(500_000)
-                    return self.scan_text(content)
-                except Exception:
-                    return False, 0.0, []
-            # Office / PDF
+                content = ""
+                for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+                    try:
+                        with open(path, "r", encoding=enc) as f:
+                            content = f.read(500_000)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                return self.scan_text(content)
+            # Office / PDF / Image
             try:
                 content = _extract_text(path, ext)
                 return self.scan_text(content)
@@ -218,10 +399,10 @@ class PIIScanner:
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         fut = ex.submit(_do_scan)
         try:
-            return fut.result(timeout=timeout)
+            return fut.result(timeout=effective_timeout)
         except concurrent.futures.TimeoutError:
             return False, 0.0, []
         except Exception:
             return False, 0.0, []
         finally:
-            ex.shutdown(wait=False)  # don't block on hung PDF threads
+            ex.shutdown(wait=False)  # don't block on hung PDF/OCR threads

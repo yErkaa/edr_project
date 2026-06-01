@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import requests
 import psutil
 
-from pii_scanner import PIIScanner
+from pii_scanner import PIIScanner, HIGH_PII_TYPES
 from process_monitor import scan_processes
 from response_handler import handle_high_event, monitor_clipboard
 from usb_monitor import USBMonitor
@@ -82,6 +82,14 @@ logger.info(f"=== EDR Agent запускается. AGENT_ID={AGENT_ID} SERVER={
 
 
 # ── Вспомогательные ───────────────────────────────────────────────────────────
+
+def _pii_severity(pii_types: list, confidence: float) -> str:
+    unique = set(pii_types)
+    if unique & HIGH_PII_TYPES:   # IIN / CARD / DOC_NUM → HIGH
+        return "HIGH"
+    if len(unique) >= 2:           # 2+ мягких типа → MEDIUM
+        return "MEDIUM"
+    return "LOW"                   # один мягкий тип → LOW
 
 # ── Одиночный экземпляр (lock-файл) ──────────────────────────────────────────
 
@@ -189,6 +197,7 @@ class Agent:
         self._registered = False
         self.pii_files: set = set()
         self.dir_watcher: DirectoryWatcher | None = None
+        self._flush_now = threading.Event()
 
     # ── Регистрация ───────────────────────────────────────────────────────────
 
@@ -237,7 +246,8 @@ class Agent:
 
     def _flush_buffer(self):
         while self.running:
-            time.sleep(30)
+            self._flush_now.wait(timeout=30)
+            self._flush_now.clear()
             rows = self.buffer.get_unsent()
             if not rows:
                 continue
@@ -282,6 +292,7 @@ class Agent:
                     if not self._registered:
                         logger.info("Сервер снова доступен, переподключаемся...")
                         self.register()
+                        self._flush_now.set()
                 else:
                     self._registered = False
             except Exception:
@@ -290,13 +301,6 @@ class Agent:
                 self._registered = False
 
     # ── Первичное сканирование ────────────────────────────────────────────────
-
-    @staticmethod
-    def _dir_entry_count(path: str) -> int:
-        try:
-            return len(os.listdir(path))
-        except Exception:
-            return 0
 
     def _scan_path(self, root_path: str, shallow: bool = False) -> int:
         """Scan root_path, return count of newly found PII files.
@@ -311,18 +315,6 @@ class Agent:
             if shallow and norm_here != norm_root:
                 dirs.clear()
                 continue
-
-            # Skip current directory if it has too many files (e.g. Telegram Desktop)
-            if len(files) > 50:
-                logger.info(f"Пропускаем папку ({len(files)} файлов): {root}")
-                dirs.clear()
-                continue
-
-            # Don't recurse into subdirectories with 50+ entries
-            dirs[:] = [
-                d for d in dirs
-                if self._dir_entry_count(os.path.join(root, d)) <= 50
-            ]
 
             for fname in files:
                 path = os.path.join(root, fname)
@@ -340,7 +332,7 @@ class Agent:
                     if is_pii and confidence >= 0.15:
                         found += 1
                         self.pii_files.add(path)
-                        severity = "MEDIUM" if confidence > 0.50 else "LOW"
+                        severity = _pii_severity(pii_types, confidence)
                         self.send_event(
                             "pii_detected",
                             severity,
@@ -352,12 +344,7 @@ class Agent:
                                 "blocked": False,
                             },
                         )
-                        ok, qpath = quarantine_file(path)
-                        if ok and qpath:
-                            logger.info(f"Quarantined on scan: {path}")
-                            self._notify_quarantine(path, qpath, pii_types, confidence)
-                        else:
-                            logger.warning(f"Could not quarantine: {path}")
+                        logger.info(f"ПД найдены, ждём команды с дашборда: {fname}")
                 except Exception as e:
                     logger.debug(f"Сканирование {path}: {e}")
 
@@ -486,7 +473,7 @@ class Agent:
             paths=WATCH_PATHS,
             scanner=self.scanner,
             callback=self._on_watcher_event,
-            quarantine_on_detect=True,
+            quarantine_on_detect=False,
         )
         # Pre-populate with files found during initial_scan
         for p in self.pii_files:
@@ -539,6 +526,179 @@ class Agent:
         except Exception as e:
             logger.error(f"monitor_clipboard завершился с ошибкой: {e}", exc_info=True)
 
+    # ── Polling команд карантина от сервера ───────────────────────────────────
+
+    def _poll_quarantine_commands(self):
+        """Каждые 5 сек выполняет команды карантина и восстановления от сервера."""
+        while self.running:
+            self._run_pending_quarantines()
+            self._run_pending_restores()
+            time.sleep(5)
+
+    def _run_pending_quarantines(self):
+        try:
+            r = requests.get(
+                f"{SERVER_BASE}/pd-files/pending-quarantine",
+                params={"agent_id": AGENT_ID}, timeout=5,
+            )
+            if r.status_code != 200:
+                return
+            for item in r.json():
+                fid, path = item["id"], item["file_path"]
+                ok, qpath = quarantine_file(path)
+                if not ok and not os.path.isfile(path):
+                    # File doesn't exist at all — mark as done to stop retrying
+                    ok = True
+                    logger.warning(f"Файл для карантина не найден (уже перемещён?): {path}")
+                try:
+                    requests.post(
+                        f"{SERVER_BASE}/pd-files/{fid}/quarantine-done",
+                        json={"quarantine_path": qpath, "success": ok},
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"pending_quarantines: {e}")
+
+    def _run_pending_restores(self):
+        try:
+            r = requests.get(
+                f"{SERVER_BASE}/quarantine/pending-restore",
+                params={"agent_id": AGENT_ID}, timeout=5,
+            )
+            if r.status_code != 200:
+                return
+            for item in r.json():
+                fid = item["id"]
+                qpath = item["quarantine_path"]
+                opath = item["original_path"]
+                from quarantine import restore_file
+                # Подавляем события вотчера для этого пути на 20 сек,
+                # чтобы восстановленный файл не породил HIGH-алерт
+                if self.dir_watcher:
+                    self.dir_watcher.suppress_restore_path(opath)
+                ok = restore_file(qpath, opath)
+                if ok:
+                    logger.info(f"Файл восстановлен: {opath}")
+                else:
+                    logger.warning(f"Не удалось восстановить: {qpath}")
+                try:
+                    requests.post(
+                        f"{SERVER_BASE}/quarantine/{fid}/restore-done",
+                        json={"success": ok}, timeout=5,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"pending_restores: {e}")
+
+    # ── Polling ручного сканирования от сервера ───────────────────────────────
+
+    # Папки которые пропускаем при поиске по всем дискам
+    _SKIP_DIRS = {
+        "windows", "program files", "program files (x86)",
+        "programdata", "recovery", "$recycle.bin", "system volume information",
+        "appdata", "application data",
+        ".venv", "venv", "node_modules", "__pycache__", ".git",
+        "pycharmprojects", "onedrive",
+    }
+
+    def _find_files_by_name(self, name: str) -> list[str]:
+        """Ищет файлы по имени (частичное совпадение, без учёта регистра) на дисках C и D."""
+        found = []
+        name_lower = name.lower()
+        for drive in ("C:\\", "D:\\"):
+            if not os.path.isdir(drive):
+                continue
+            for root, dirs, files in os.walk(drive, topdown=True):
+                # Пропускаем системные/служебные папки
+                dirs[:] = [
+                    d for d in dirs
+                    if d.lower() not in self._SKIP_DIRS
+                    and not d.startswith(".")
+                ]
+                for fname in files:
+                    if name_lower in fname.lower():
+                        found.append(os.path.join(root, fname))
+        return found
+
+    def _poll_scan_requests(self):
+        """Каждые 5 сек выполняет ручные запросы сканирования с дашборда."""
+        while self.running:
+            try:
+                r = requests.get(
+                    f"{SERVER_BASE}/pending-scans",
+                    params={"agent_id": AGENT_ID}, timeout=5,
+                )
+                if r.status_code == 200:
+                    for item in r.json():
+                        name = item["name"]
+                        threading.Thread(
+                            target=self._do_manual_scan_by_name, args=(name,), daemon=True
+                        ).start()
+            except Exception as e:
+                logger.debug(f"pending_scans poll: {e}")
+            time.sleep(5)
+
+    def _do_manual_scan_by_name(self, name: str):
+        logger.info(f"Поиск файла по имени: '{name}'")
+        found = self._find_files_by_name(name)
+        logger.info(f"Найдено файлов: {len(found)}")
+
+        if not found:
+            # Сообщаем серверу что файл не найден
+            try:
+                requests.post(f"{SERVER_BASE}/scan-file-done", json={
+                    "agent_id": AGENT_ID,
+                    "file_path": name,
+                    "is_pii": False,
+                    "pii_types": "",
+                    "confidence": 0.0,
+                    "found_count": 0,
+                }, timeout=10)
+            except Exception:
+                pass
+            return
+
+        for path in found:
+            self._do_manual_scan(path, found_count=len(found))
+
+    def _do_manual_scan(self, path: str, found_count: int = 1):
+        logger.info(f"Ручное сканирование: {path}")
+        try:
+            is_pii, confidence, pii_types = self.scanner.scan_file(path)
+        except Exception as e:
+            logger.warning(f"Ошибка сканирования {path}: {e}")
+            is_pii, confidence, pii_types = False, 0.0, []
+
+        payload = {
+            "agent_id": AGENT_ID,
+            "file_path": path,
+            "is_pii": is_pii,
+            "pii_types": ",".join(pii_types),
+            "confidence": confidence,
+            "found_count": found_count,
+        }
+        try:
+            requests.post(f"{SERVER_BASE}/scan-file-done", json=payload, timeout=10)
+        except Exception as e:
+            logger.warning(f"scan-file-done error: {e}")
+
+        if is_pii and confidence >= 0.15:
+            fname = os.path.basename(path)
+            severity = _pii_severity(pii_types, confidence)
+            self.send_event("pii_detected", severity, {
+                "file": path,
+                "file_name": fname,
+                "confidence": confidence,
+                "pii_types": ",".join(pii_types),
+                "blocked": False,
+            })
+            logger.info(f"Ручной скан — ПД найдены: {fname} ({','.join(pii_types)})")
+        else:
+            logger.info(f"Ручной скан — ПД не найдены: {path}")
+
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self):
@@ -550,6 +710,8 @@ class Agent:
                 "Сервер недоступен при старте — работаем в автономном режиме, "
                 "события будут буферизованы."
             )
+        else:
+            self._flush_now.set()
 
         self.initial_scan()
         self.watch_files()
@@ -560,6 +722,8 @@ class Agent:
             threading.Thread(target=self._flush_buffer, daemon=True),
             threading.Thread(target=self._heartbeat, daemon=True),
             threading.Thread(target=self._monitor_clipboard, daemon=True),
+            threading.Thread(target=self._poll_quarantine_commands, daemon=True),
+            threading.Thread(target=self._poll_scan_requests, daemon=True),
         ]
         for t in threads:
             t.start()

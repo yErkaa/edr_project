@@ -593,6 +593,112 @@ class Agent:
         except Exception as e:
             logger.debug(f"pending_restores: {e}")
 
+    # ── Polling ручного сканирования от сервера ───────────────────────────────
+
+    # Папки которые пропускаем при поиске по всем дискам
+    _SKIP_DIRS = {
+        "windows", "program files", "program files (x86)",
+        "programdata", "recovery", "$recycle.bin", "system volume information",
+        "appdata", "application data",
+        ".venv", "venv", "node_modules", "__pycache__", ".git",
+        "pycharmprojects", "onedrive",
+    }
+
+    def _find_files_by_name(self, name: str) -> list[str]:
+        """Ищет файлы по имени (частичное совпадение, без учёта регистра) на дисках C и D."""
+        found = []
+        name_lower = name.lower()
+        for drive in ("C:\\", "D:\\"):
+            if not os.path.isdir(drive):
+                continue
+            for root, dirs, files in os.walk(drive, topdown=True):
+                # Пропускаем системные/служебные папки
+                dirs[:] = [
+                    d for d in dirs
+                    if d.lower() not in self._SKIP_DIRS
+                    and not d.startswith(".")
+                ]
+                for fname in files:
+                    if name_lower in fname.lower():
+                        found.append(os.path.join(root, fname))
+        return found
+
+    def _poll_scan_requests(self):
+        """Каждые 5 сек выполняет ручные запросы сканирования с дашборда."""
+        while self.running:
+            try:
+                r = requests.get(
+                    f"{SERVER_BASE}/pending-scans",
+                    params={"agent_id": AGENT_ID}, timeout=5,
+                )
+                if r.status_code == 200:
+                    for item in r.json():
+                        name = item["name"]
+                        threading.Thread(
+                            target=self._do_manual_scan_by_name, args=(name,), daemon=True
+                        ).start()
+            except Exception as e:
+                logger.debug(f"pending_scans poll: {e}")
+            time.sleep(5)
+
+    def _do_manual_scan_by_name(self, name: str):
+        logger.info(f"Поиск файла по имени: '{name}'")
+        found = self._find_files_by_name(name)
+        logger.info(f"Найдено файлов: {len(found)}")
+
+        if not found:
+            # Сообщаем серверу что файл не найден
+            try:
+                requests.post(f"{SERVER_BASE}/scan-file-done", json={
+                    "agent_id": AGENT_ID,
+                    "file_path": name,
+                    "is_pii": False,
+                    "pii_types": "",
+                    "confidence": 0.0,
+                    "found_count": 0,
+                }, timeout=10)
+            except Exception:
+                pass
+            return
+
+        for path in found:
+            self._do_manual_scan(path, found_count=len(found))
+
+    def _do_manual_scan(self, path: str, found_count: int = 1):
+        logger.info(f"Ручное сканирование: {path}")
+        try:
+            is_pii, confidence, pii_types = self.scanner.scan_file(path)
+        except Exception as e:
+            logger.warning(f"Ошибка сканирования {path}: {e}")
+            is_pii, confidence, pii_types = False, 0.0, []
+
+        payload = {
+            "agent_id": AGENT_ID,
+            "file_path": path,
+            "is_pii": is_pii,
+            "pii_types": ",".join(pii_types),
+            "confidence": confidence,
+            "found_count": found_count,
+        }
+        try:
+            requests.post(f"{SERVER_BASE}/scan-file-done", json=payload, timeout=10)
+        except Exception as e:
+            logger.warning(f"scan-file-done error: {e}")
+
+        if is_pii and confidence >= 0.15:
+            fname = os.path.basename(path)
+            severity = _pii_severity(pii_types, confidence)
+            self.send_event("pii_detected", severity, {
+                "file": path,
+                "file_name": fname,
+                "confidence": confidence,
+                "pii_types": ",".join(pii_types),
+                "blocked": False,
+            })
+            logger.info(f"Ручной скан — ПД найдены: {fname} ({','.join(pii_types)})")
+        else:
+            logger.info(f"Ручной скан — ПД не найдены: {path}")
+
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self):
@@ -617,6 +723,7 @@ class Agent:
             threading.Thread(target=self._heartbeat, daemon=True),
             threading.Thread(target=self._monitor_clipboard, daemon=True),
             threading.Thread(target=self._poll_quarantine_commands, daemon=True),
+            threading.Thread(target=self._poll_scan_requests, daemon=True),
         ]
         for t in threads:
             t.start()

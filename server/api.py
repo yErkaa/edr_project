@@ -4,6 +4,7 @@ import logging
 import os
 import smtplib
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -61,6 +62,9 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 detection_engine = DetectionEngine()
 oauth2_scheme    = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# In-memory queue of manual scan requests: agent_id → [file_path, ...]
+_pending_scans: dict[str, list[str]] = defaultdict(list)
 
 app.mount("/screenshots", StaticFiles(directory=_SCR_DIR), name="screenshots")
 
@@ -1157,6 +1161,78 @@ async def quarantine_done(
             select(func.count()).select_from(QuarantineFile).where(QuarantineFile.is_restored == False)  # noqa: E712
         )
         await manager.broadcast({"type": "quarantine_update", "count": cnt.scalar() or 0})
+    return {"status": "ok"}
+
+
+# ── Manual file scan ─────────────────────────────────────────────────────────
+
+class ScanFileIn(BaseModel):
+    agent_id: str
+    file_name: str   # filename or partial name to search across all drives
+
+
+class ScanFileDoneIn(BaseModel):
+    agent_id: str
+    file_path: str
+    is_pii: bool
+    pii_types: str = ""
+    confidence: float = 0.0
+    found_count: int = 0   # how many matching files were found on disk
+
+
+@app.post("/scan-file")
+async def scan_file_request(
+    data: ScanFileIn,
+    current_user: User = Depends(get_current_user),
+):
+    """Dashboard asks agent to search for a file by name and scan it."""
+    _pending_scans[data.agent_id].append(data.file_name)
+    logger.info(f"Запрос поиска+скан: '{data.file_name}' (агент {data.agent_id})")
+    return {"status": "queued"}
+
+
+@app.get("/pending-scans")
+async def get_pending_scans(agent_id: str):
+    """Agent polls: which filenames should I search and scan? No auth needed."""
+    names = _pending_scans.pop(agent_id, [])
+    return [{"name": n} for n in names]
+
+
+@app.post("/scan-file-done")
+async def scan_file_done(
+    data: ScanFileDoneIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent reports scan result. If PII found, creates/updates PDFile."""
+    if data.is_pii:
+        fname = os.path.basename(data.file_path)
+        existing = await db.execute(
+            select(PDFile).where(
+                PDFile.agent_id == data.agent_id,
+                PDFile.file_path == data.file_path,
+            )
+        )
+        pd = existing.scalars().first()
+        if not pd:
+            pd = PDFile(
+                agent_id=data.agent_id,
+                file_path=data.file_path,
+                file_name=fname,
+                pii_types=data.pii_types,
+                confidence=data.confidence,
+            )
+            db.add(pd)
+            await db.commit()
+        await manager.broadcast({"type": "pd_files_update"})
+    await manager.broadcast({
+        "type": "scan_file_done",
+        "file_path": data.file_path,
+        "is_pii": data.is_pii,
+        "pii_types": data.pii_types,
+        "confidence": data.confidence,
+        "found_count": data.found_count,
+    })
+    logger.info(f"Результат скана {data.file_path}: is_pii={data.is_pii}")
     return {"status": "ok"}
 
 

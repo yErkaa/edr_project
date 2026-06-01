@@ -231,13 +231,16 @@ agent_stdout.txt
 # EDR Agent вЂ” archives
 *.zip
 
+# Embedded Python in installer (too large for git, rebuild with BUILD_INSTALLER.bat)
+installer_v2/python/
+
 # PyCharm
 .idea/
 
 # Claude Code
 .claude/
 
-# ML datasets and models (слишком
-  большие)
+# ML datasets and models (пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+  пїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
 server/ml_model/datasets/
 server/ml_model/*.pkl

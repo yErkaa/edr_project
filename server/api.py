@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -215,6 +216,33 @@ async def startup():
         await db.commit()
 
     logger.info("EDR Server готов к работе")
+    asyncio.create_task(_offline_watchdog())
+
+
+async def _offline_watchdog():
+    """Каждые 60 сек помечает агентов офлайн если нет heartbeat > 2 минут."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            cutoff = datetime.utcnow() - timedelta(seconds=120)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(AgentModel).where(
+                        AgentModel.is_online == True,       # noqa: E712
+                        AgentModel.last_seen < cutoff,
+                    )
+                )
+                stale = result.scalars().all()
+                for agent in stale:
+                    agent.is_online = False
+                    logger.info(f"Агент офлайн (нет heartbeat): {agent.agent_id}")
+                    await manager.broadcast(
+                        {"type": "agent_update", "agent_id": agent.agent_id, "is_online": False}
+                    )
+                if stale:
+                    await db.commit()
+        except Exception as e:
+            logger.error(f"_offline_watchdog: {e}")
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────

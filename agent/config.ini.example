@@ -1,0 +1,20 @@
+[server]
+; IP или hostname ноутбука с сервером
+host     = 192.168.X.X
+port     = 8088
+base_url = http://192.168.X.X:8088
+url      = http://192.168.X.X:8088
+
+[agent]
+; Имя этого агента в дашборде (оставь пустым = hostname компьютера)
+agent_id    =
+id          =
+; Папки для мониторинга через запятую (оставь пустым = Desktop, Documents, Downloads)
+watch_paths =
+
+[protection]
+enabled           = true
+password          = school2024
+max_attempts      = 3
+block_mail        = false
+monitor_clipboard = true

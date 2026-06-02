@@ -1,32 +1,69 @@
 @echo off
 chcp 65001 >nul 2>&1
 
-:: Request admin rights if not already elevated
+REM Запрашиваем права администратора если нет
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
 
-title EDR Agent - School Protection
-color 0A
+title EDR Agent
+
+set BASE=C:\edr_agent
+set AGENT=%BASE%\agent\agent.py
+
 echo ========================================
-echo   EDR AGENT  -  School Protection
+echo   EDR Agent
+echo   Папка: %BASE%
 echo ========================================
 echo.
 
-:: Pull latest code from GitHub
-echo [%time%] Checking for updates...
-cd /d "C:\edr_agent"
+REM Ищем Python: сначала venv, потом системный
+set VENV_PY=%BASE%\edr_agent_for_laptop2\.venv\Scripts\python.exe
+if exist "%VENV_PY%" (
+    set PYTHON=%VENV_PY%
+    echo [OK] Python: venv
+) else (
+    set PYTHON=python
+    echo [OK] Python: системный
+)
+
+REM Обновляем код из GitHub один раз при старте
+echo.
+echo [%time%] Обновление кода из GitHub...
+cd /d "%BASE%"
 git pull
 echo.
 
-set VENV=C:\edr_agent\edr_agent_for_laptop2\.venv\Scripts\python.exe
-set AGENT=C:\edr_agent\agent\agent.py
-
 :loop
-echo [%time%] Starting agent...
-"%VENV%" "%AGENT%"
-echo [%time%] Agent stopped. Restarting in 5 seconds...
-timeout /t 5 /nobreak
+echo [%time%] -- Запуск агента --
+
+REM Удаляем устаревший lock файл
+if exist "%BASE%\agent\data\agent.lock" (
+    del "%BASE%\agent\data\agent.lock" >nul 2>&1
+)
+
+cd /d "%BASE%\agent"
+"%PYTHON%" -u agent.py
+set EXIT_CODE=%errorlevel%
+
+if %EXIT_CODE% equ 0 (
+    echo.
+    echo [%time%] Агент остановлен.
+    pause
+    exit /b 0
+)
+
+if %EXIT_CODE% equ 99 (
+    echo.
+    echo [%time%] Обновление применено -- перезапуск...
+    timeout /t 2 /nobreak >nul
+    goto loop
+)
+
+echo.
+echo [%time%] Агент завершился с ошибкой (код %EXIT_CODE%).
+echo         Перезапуск через 5 секунд... (CTRL+C чтобы выйти)
+timeout /t 5 /nobreak >nul
 goto loop

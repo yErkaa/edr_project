@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -1268,6 +1269,42 @@ async def scan_file_done(
     })
     logger.info(f"Результат скана {data.file_path}: is_pii={data.is_pii}")
     return {"status": "ok"}
+
+
+# ── Agent auto-update ─────────────────────────────────────────────────────────
+
+_AGENT_UPDATE_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent")
+)
+_UPDATABLE_FILES = {
+    "agent.py", "pii_scanner.py", "quarantine.py",
+    "response_handler.py", "usb_monitor.py", "process_monitor.py",
+}
+
+
+@app.get("/agent-version")
+async def get_agent_version():
+    """Хеш исходников агента — агент проверяет при старте нужно ли обновляться."""
+    h = hashlib.sha256()
+    for fname in sorted(_UPDATABLE_FILES):
+        path = os.path.join(_AGENT_UPDATE_DIR, fname)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                h.update(f.read())
+    return {"version": h.hexdigest()[:16]}
+
+
+@app.get("/agent-update/{filename}")
+async def get_agent_file(filename: str):
+    """Отдаёт .py файл агента для автообновления. Без авторизации — агент качает до регистрации."""
+    if filename not in _UPDATABLE_FILES:
+        raise HTTPException(status_code=404, detail="File not found")
+    path = os.path.join(_AGENT_UPDATE_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    with open(path, "rb") as f:
+        content = f.read()
+    return Response(content=content, media_type="text/plain; charset=utf-8")
 
 
 # ── Dashboard / Health ────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 """EDR Agent — основной процесс агента."""
 import sys
 import os
+import hashlib
+import subprocess
 
 # Гарантируем, что директория агента в sys.path
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -741,7 +743,52 @@ class Agent:
             logger.info("Агент остановлен.")
 
 
+_UPDATABLE_FILES = [
+    "agent.py", "pii_scanner.py", "quarantine.py",
+    "response_handler.py", "usb_monitor.py", "process_monitor.py",
+]
+
+
+def _local_version() -> str:
+    h = hashlib.sha256()
+    for fname in sorted(_UPDATABLE_FILES):
+        p = os.path.join(_AGENT_DIR, fname)
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()[:16]
+
+
+def _check_and_update():
+    """При старте сравниваем версию с сервером. Если отличается — скачиваем и перезапускаемся."""
+    try:
+        r = requests.get(f"{SERVER_BASE}/agent-version", timeout=5)
+        if r.status_code != 200:
+            return
+        server_ver = r.json().get("version", "")
+        local_ver = _local_version()
+        if server_ver == local_ver:
+            logger.info(f"Версия агента актуальна: {local_ver}")
+            return
+        logger.info(f"Обновление: {local_ver} → {server_ver}. Загружаю файлы...")
+        for fname in _UPDATABLE_FILES:
+            fr = requests.get(f"{SERVER_BASE}/agent-update/{fname}", timeout=30)
+            if fr.status_code == 200:
+                dest = os.path.join(_AGENT_DIR, fname)
+                with open(dest, "wb") as f:
+                    f.write(fr.content)
+                logger.info(f"  Обновлён: {fname}")
+            else:
+                logger.warning(f"  Не удалось скачать: {fname} (HTTP {fr.status_code})")
+        logger.info("Перезапуск агента с новой версией...")
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)
+    except Exception as e:
+        logger.warning(f"Автообновление недоступно (сервер не отвечает?): {e}")
+
+
 if __name__ == "__main__":
+    _check_and_update()
     if not _acquire_lock():
         logger.error(
             f"Агент уже запущен (PID из {_LOCK_FILE}). "

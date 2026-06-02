@@ -60,10 +60,16 @@ WATCH_PATHS = (
     ]
 )
 
-BUFFER_DB = os.path.join(_AGENT_DIR, "agent_buffer.db")
+BUFFER_DB     = os.path.join(_AGENT_DIR, "agent_buffer.db")
 
-_DATA_DIR  = os.path.join(_AGENT_DIR, "data")
-_LOCK_FILE = os.path.join(_DATA_DIR, "agent.lock")
+_DATA_DIR      = os.path.join(_AGENT_DIR, "data")
+_LOCK_FILE     = os.path.join(_DATA_DIR, "agent.lock")
+_SCAN_CACHE_DB = os.path.join(_DATA_DIR, "scan_cache.db")
+
+# Изображения дают много ложных срабатываний через OCR — требуем более высокую уверенность
+_IMAGE_EXTS_AGENT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
+_MIN_CONF_DEFAULT = 0.15
+_MIN_CONF_IMAGE   = 0.40
 
 # ── Логирование ───────────────────────────────────────────────────────────────
 
@@ -195,6 +201,63 @@ class LocalBuffer:
                 conn.commit()
 
 
+# ── Кеш сканирования ──────────────────────────────────────────────────────────
+
+class ScanCache:
+    """Хранит mtime+size уже отсканированных файлов.
+    При повторном запуске агента пропускает файлы которые не изменились."""
+
+    def __init__(self, db_path: str):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scan_cache (
+                    path  TEXT PRIMARY KEY,
+                    mtime REAL NOT NULL,
+                    size  INTEGER NOT NULL
+                )
+            """)
+            conn.commit()
+
+    def is_cached(self, path: str) -> bool:
+        """True если файл не изменился с последнего сканирования."""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return False
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT mtime, size FROM scan_cache WHERE path=?", (path,)
+                ).fetchone()
+        return (row is not None
+                and abs(row[0] - st.st_mtime) < 0.01
+                and row[1] == st.st_size)
+
+    def mark(self, path: str):
+        """Записать текущий mtime+size файла — пометить как отсканированный."""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO scan_cache (path, mtime, size) VALUES (?,?,?)",
+                    (path, st.st_mtime, st.st_size),
+                )
+                conn.commit()
+
+    def invalidate(self, path: str):
+        """Убрать файл из кеша — будет пересканирован при следующем старте."""
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM scan_cache WHERE path=?", (path,))
+                conn.commit()
+
+
 # ── Агент ─────────────────────────────────────────────────────────────────────
 
 class Agent:
@@ -202,6 +265,7 @@ class Agent:
         self.scanner = PIIScanner()
         self.usb_monitor = USBMonitor()
         self.buffer = LocalBuffer(BUFFER_DB)
+        self.scan_cache = ScanCache(_SCAN_CACHE_DB)
         self.running = True
         self.observers: list = []
         self._watched_paths: set = set()
@@ -339,9 +403,22 @@ class Agent:
                     logger.debug(f"Quarantine stub, skip: {fname}")
                     continue
 
+                # Файл уже сканировался и не изменился — пропускаем
+                if self.scan_cache.is_cached(path):
+                    logger.debug(f"Кеш (пропуск): {fname}")
+                    continue
+
                 try:
                     is_pii, confidence, pii_types = self.scanner.scan_file(path)
-                    if is_pii and confidence >= 0.15:
+                    # Записываем в кеш после сканирования (не важно нашли ПД или нет)
+                    self.scan_cache.mark(path)
+
+                    # Для изображений порог выше — OCR даёт много ложных срабатываний
+                    ext_lower = os.path.splitext(fname)[1].lower()
+                    min_conf = (_MIN_CONF_IMAGE if ext_lower in _IMAGE_EXTS_AGENT
+                                else _MIN_CONF_DEFAULT)
+
+                    if is_pii and confidence >= min_conf:
                         found += 1
                         self.pii_files.add(path)
                         severity = _pii_severity(pii_types, confidence)
@@ -457,6 +534,8 @@ class Agent:
         """Callback from DirectoryWatcher."""
         if extra is None:
             extra = {}
+        # Файл изменился — убираем из кеша, чтобы следующий запуск его пересканировал
+        self.scan_cache.invalidate(path)
         scr_filename = ""
         if severity == "HIGH":
             scr_filename = self._take_and_upload_screenshot(event_type)

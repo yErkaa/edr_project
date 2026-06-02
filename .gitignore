@@ -219,7 +219,6 @@ __marimo__/
 
 # EDR Agent — конфиг с паролями/IP (у каждой машины свой)
 edr_agent_for_laptop2/config.ini
-agent/config.ini
 
 # EDR Agent — runtime files
 logs/

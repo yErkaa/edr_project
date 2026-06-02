@@ -11,15 +11,25 @@ if %errorLevel% neq 0 (
 title EDR Agent
 
 set BASE=C:\edr_agent
-set AGENT=%BASE%\agent\agent.py
 
 echo ========================================
-echo   EDR Agent
+echo   EDR Agent  -  Laptop 2
 echo   Папка: %BASE%
 echo ========================================
 echo.
 
-REM Ищем Python: сначала venv, потом системный
+REM ── Настройки подключения ──────────────────────────────────
+REM Адрес сервера (ноутбук 1). Меняй если изменился IP.
+set EDR_SERVER=http://DESKTOP-CLJB78R:8088
+
+REM Имя этого агента в дашборде
+set AGENT_ID=LAPTOP2
+
+echo [OK] Сервер: %EDR_SERVER%
+echo [OK] Агент:  %AGENT_ID%
+echo.
+
+REM ── Python ─────────────────────────────────────────────────
 set VENV_PY=%BASE%\edr_agent_for_laptop2\.venv\Scripts\python.exe
 if exist "%VENV_PY%" (
     set PYTHON=%VENV_PY%
@@ -29,7 +39,7 @@ if exist "%VENV_PY%" (
     echo [OK] Python: системный
 )
 
-REM Обновляем код из GitHub один раз при старте
+REM ── Обновление кода из GitHub (один раз при старте) ────────
 echo.
 echo [%time%] Обновление кода из GitHub...
 cd /d "%BASE%"

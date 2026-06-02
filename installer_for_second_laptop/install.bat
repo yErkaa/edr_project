@@ -103,10 +103,8 @@ set DESKTOP=%USERPROFILE%\Desktop
 set SHORTCUT_PATH=%DESKTOP%\EDR Agent.bat
 (
     echo @echo off
-    echo title EDR Agent
     echo cd /d C:\EDR\agent
-    echo python -u agent.py
-    echo pause
+    echo call START_AGENT.bat
 ) > "%SHORTCUT_PATH%"
 echo [OK] Ярлык создан: %SHORTCUT_PATH%
 

@@ -790,9 +790,8 @@ def _check_and_update():
                 logger.info(f"  Обновлён: {fname}")
             else:
                 logger.warning(f"  Не удалось скачать: {fname} (HTTP {fr.status_code})")
-        logger.info("Перезапуск агента с новой версией...")
-        subprocess.Popen([sys.executable] + sys.argv)
-        sys.exit(0)
+        logger.info("Обновление применено. Выхожу (код 99) — лаунчер перезапустит агент.")
+        sys.exit(99)
     except Exception as e:
         logger.warning(f"Автообновление недоступно (сервер не отвечает?): {e}")
 

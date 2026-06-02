@@ -137,6 +137,18 @@ def restore_file(quarantine_path: str, original_path: str) -> bool:
         logger.error(f"restore: not found: {quarantine_path}")
         return False
     try:
+        # Снимаем ACL-блок с файла В КАРАНТИНЕ перед перемещением.
+        # block_file() ставит DENY Everyone — это ограничение путешествует
+        # вместе с файлом при перемещении и не даёт shutil.move() работать.
+        subprocess.run(
+            ["icacls", quarantine_path, "/reset", "/Q"],
+            capture_output=True, timeout=5,
+        )
+        subprocess.run(
+            ["icacls", quarantine_path, "/grant", "Everyone:(F)", "/Q"],
+            capture_output=True, timeout=5,
+        )
+
         # Remove stub at original path if present
         if os.path.isfile(original_path) and is_quarantine_stub(original_path):
             os.remove(original_path)
@@ -144,15 +156,11 @@ def restore_file(quarantine_path: str, original_path: str) -> bool:
         os.makedirs(os.path.dirname(os.path.abspath(original_path)), exist_ok=True)
         shutil.move(quarantine_path, original_path)
 
-        # Reset ACL — quarantine dir has DENY EVERYONE, file may inherit those rights
-        try:
-            import subprocess
-            subprocess.run(
-                ["icacls", original_path, "/reset"],
-                capture_output=True, timeout=5,
-            )
-        except Exception:
-            pass
+        # Сбрасываем ACL на восстановленном файле до наследуемых от папки
+        subprocess.run(
+            ["icacls", original_path, "/reset", "/Q"],
+            capture_output=True, timeout=5,
+        )
 
         logger.info(f"Restored: {quarantine_path} → {original_path}")
         return True

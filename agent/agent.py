@@ -106,9 +106,19 @@ def _acquire_lock() -> bool:
                 try:
                     proc = psutil.Process(pid)
                     if proc.status() != psutil.STATUS_ZOMBIE:
-                        return False   # живой процесс — не запускаем второй
-                except psutil.NoSuchProcess:
+                        # Проверяем что PID принадлежит именно нашему агенту,
+                        # а не другому процессу которому ОС переиспользовала этот PID
+                        cmdline = " ".join(proc.cmdline()).lower()
+                        if "agent.py" in cmdline:
+                            return False   # действительно наш агент работает
+                        # PID переиспользован другим процессом — lock устарел
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
+        except Exception:
+            pass
+        # Устаревший lock файл — удаляем и берём блокировку
+        try:
+            os.remove(_LOCK_FILE)
         except Exception:
             pass
     with open(_LOCK_FILE, "w") as f:

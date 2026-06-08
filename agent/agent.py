@@ -261,6 +261,14 @@ class ScanCache:
                 conn.execute("DELETE FROM scan_cache WHERE path=?", (path,))
                 conn.commit()
 
+    def clear(self):
+        """Очистить весь кеш — принудит пересканирование всех файлов."""
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM scan_cache")
+                conn.commit()
+        logger.info("Кеш сканирования очищен (force rescan)")
+
 
 # ── Агент ─────────────────────────────────────────────────────────────────────
 
@@ -585,6 +593,28 @@ class Agent:
 
     # ── Мониторинг USB ────────────────────────────────────────────────────────
 
+    def _scan_usb_drive(self, drive: str):
+        """Сканирует существующие файлы на флешке при вставке и блокирует ПД."""
+        logger.info(f"Сканирование содержимого USB при вставке: {drive}")
+        _skip = {"system volume information", "recycled", "$recycle.bin", ".trash-1000"}
+        try:
+            for root, dirs, files in os.walk(drive, topdown=True):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in _skip]
+                for fname in files:
+                    path = os.path.join(root, fname)
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext not in PROTECTED_EXTS:
+                        continue
+                    try:
+                        is_pii, confidence, pii_types = self.scanner.scan_file(path)
+                        if is_pii and confidence >= _MIN_CONF_DEFAULT:
+                            logger.warning(f"ПД на USB (существующий файл): {path}")
+                            self.on_usb_pii_event(path)
+                    except Exception as e:
+                        logger.debug(f"USB scan {path}: {e}")
+        except Exception as e:
+            logger.error(f"_scan_usb_drive {drive}: {e}")
+
     def monitor_usb(self):
         while self.running:
             try:
@@ -599,6 +629,8 @@ class Agent:
                     )
                     if self.dir_watcher:
                         self.dir_watcher.add_usb_path(norm, self.on_usb_pii_event)
+                    # Сканируем файлы которые уже были на флешке
+                    threading.Thread(target=self._scan_usb_drive, args=(norm,), daemon=True).start()
                     logger.info(f"USB подключён: {norm}")
                 for drive in removed:
                     norm = os.path.normpath(drive)
@@ -617,6 +649,47 @@ class Agent:
             logger.warning("Clipboard-монитор завершился штатно (неожиданно).")
         except Exception as e:
             logger.error(f"monitor_clipboard завершился с ошибкой: {e}", exc_info=True)
+
+    # ── Polling команды ресканирования от сервера ─────────────────────────────
+
+    def _poll_rescan_commands(self):
+        """Каждые 10 сек проверяет команду полного ресканирования от дашборда."""
+        while self.running:
+            try:
+                r = requests.get(
+                    f"{SERVER_BASE}/pending-rescan",
+                    params={"agent_id": AGENT_ID}, timeout=5,
+                )
+                if r.status_code == 200 and r.json().get("rescan"):
+                    logger.info("Получена команда ресканирования с дашборда")
+                    threading.Thread(target=self._do_rescan, daemon=True).start()
+            except Exception as e:
+                logger.debug(f"pending_rescan poll: {e}")
+            time.sleep(10)
+
+    def _do_rescan(self):
+        """Очищает кеш и запускает полное сканирование всех папок наблюдения."""
+        logger.info("=== Принудительное ресканирование (команда с дашборда) ===")
+        self.scan_cache.clear()
+        found = 0
+        downloads_norm = os.path.normpath(os.path.expanduser("~/Downloads"))
+        for root_path in WATCH_PATHS:
+            if not os.path.exists(root_path):
+                continue
+            norm = os.path.normpath(root_path)
+            shallow = norm.lower() == downloads_norm.lower()
+            label = "(поверхностно)" if shallow else "(рекурсивно)"
+            logger.info(f"Ресканирую {root_path} {label}")
+            found += self._scan_path(root_path, shallow=shallow)
+        logger.info(f"=== Ресканирование завершено: {found} ПД-файлов ===")
+        try:
+            requests.post(
+                f"{SERVER_BASE}/rescan-done",
+                json={"agent_id": AGENT_ID, "found": found},
+                timeout=10,
+            )
+        except Exception as e:
+            logger.warning(f"rescan-done error: {e}")
 
     # ── Polling команд карантина от сервера ───────────────────────────────────
 
@@ -815,6 +888,7 @@ class Agent:
             threading.Thread(target=self._heartbeat, daemon=True),
             threading.Thread(target=self._poll_quarantine_commands, daemon=True),
             threading.Thread(target=self._poll_scan_requests, daemon=True),
+            threading.Thread(target=self._poll_rescan_commands, daemon=True),
         ]
         if MONITOR_CLIPBOARD:
             threads.append(threading.Thread(target=self._monitor_clipboard, daemon=True))

@@ -1002,10 +1002,9 @@ async function loadAgents() {
 function _populateScanAgentSelect(agents) {
   const sel = document.getElementById('scanAgentSelect');
   if (!sel) return;
-  const all = agents.filter(a => a.is_online);
-  if (!all.length) { sel.innerHTML = '<option value="">Нет агентов онлайн</option>'; return; }
-  sel.innerHTML = all.map(a =>
-    `<option value="${escHtml(a.agent_id)}">${escHtml(a.agent_id)} (${escHtml(a.hostname||a.agent_id)})</option>`
+  if (!agents.length) { sel.innerHTML = '<option value="">Нет зарегистрированных агентов</option>'; return; }
+  sel.innerHTML = agents.map(a =>
+    `<option value="${escHtml(a.agent_id)}">${escHtml(a.agent_id)} (${escHtml(a.hostname||a.agent_id)})${a.is_online ? '' : ' [офлайн]'}</option>`
   ).join('');
 }
 
@@ -1047,7 +1046,7 @@ async function loadPdFiles() {
   const data = await apiFetch('/pd-files');
   const tbody = document.getElementById('pdFilesBody');
   if (!data) { tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4" style="color:var(--text-muted)">Ошибка загрузки</td></tr>'; return; }
-  _allPdFiles = data.filter(f => !f.is_blocked);
+  _allPdFiles = data;  // показываем ВСЕ файлы, включая заблокированные в карантине
   filterPdFiles();
 }
 
@@ -1416,12 +1415,11 @@ function renderEvents(events) {
 
 function renderAgents(agents) {
   const grid = document.getElementById('agentsGrid');
-  const online = agents.filter(a => a.is_online);
-  if (!online.length) { grid.innerHTML = '<div style="color:var(--text-muted)">Нет агентов онлайн</div>'; return; }
-  grid.innerHTML = online.map(a => `
-    <div class="agent-card">
+  if (!agents.length) { grid.innerHTML = '<div style="color:var(--text-muted)">Нет зарегистрированных агентов</div>'; return; }
+  grid.innerHTML = agents.map(a => `
+    <div class="agent-card" style="${a.is_online ? '' : 'opacity:.7;border-color:rgba(244,63,94,.15)'}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-        <div class="a-hostname"><i class="bi bi-pc-display me-2" style="color:var(--accent3)"></i>${escHtml(a.hostname||a.agent_id)}</div>
+        <div class="a-hostname"><i class="bi bi-pc-display me-2" style="color:${a.is_online?'var(--accent3)':'var(--text-dim)'}"></i>${escHtml(a.hostname||a.agent_id)}</div>
         <span class="${a.is_online?'online-pill':'offline-pill'}">${a.is_online?'Онлайн':'Офлайн'}</span>
       </div>
       <div class="a-id mb-2">${escHtml(a.agent_id)}</div>
@@ -1430,7 +1428,18 @@ function renderAgents(agents) {
         <div><i class="bi bi-windows me-1"></i>${escHtml(a.os_info||'—')}</div>
         <div><i class="bi bi-clock me-1"></i>${fmtTime(a.last_seen)}</div>
       </div>
+      <div style="margin-top:10px">
+        <button class="btn-dark-outline" style="width:100%;font-size:.75rem" onclick="requestRescan('${escHtml(a.agent_id)}')">
+          <i class="bi bi-arrow-repeat me-1"></i>Запустить сканирование ПД
+        </button>
+      </div>
     </div>`).join('');
+}
+
+async function requestRescan(agentId) {
+  showToast('Запрос ресканирования отправлен агенту ' + agentId, 'warning');
+  const r = await apiFetch(`/agents/${encodeURIComponent(agentId)}/request-rescan`, {method:'POST'});
+  if (!r) showToast('Ошибка: не удалось отправить запрос', 'danger');
 }
 
 function renderPrivileges(privs) {
@@ -1740,6 +1749,11 @@ function handleWSMessage(msg) {
     if (found) found.is_resolved = true;
     updateAlertCounters();
     renderAlerts(allAlerts.filter(a => !a.is_resolved));
+  } else if (msg.type === 'rescan_done') {
+    const txt = `Ресканирование ${escHtml(msg.agent_id||'')}: найдено ${msg.found} ПД-файлов`;
+    showToast(txt, msg.found > 0 ? 'warning' : 'success');
+    loadPdFiles();
+    loadPiiCount();
   }
 }
 

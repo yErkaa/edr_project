@@ -75,6 +75,9 @@ oauth2_scheme    = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # In-memory queue of manual scan requests: agent_id → [file_path, ...]
 _pending_scans: dict[str, list[str]] = defaultdict(list)
 
+# In-memory rescan requests: agent_id → True (one-shot flag)
+_pending_rescans: set[str] = set()
+
 app.mount("/screenshots", StaticFiles(directory=_SCR_DIR), name="screenshots")
 
 
@@ -1237,6 +1240,36 @@ async def get_pending_scans(agent_id: str):
     """Agent polls: which filenames should I search and scan? No auth needed."""
     names = _pending_scans.pop(agent_id, [])
     return [{"name": n} for n in names]
+
+
+@app.post("/agents/{agent_id}/request-rescan")
+async def request_rescan(
+    agent_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Dashboard asks agent to clear scan cache and re-scan all watch paths."""
+    _pending_rescans.add(agent_id)
+    logger.info(f"Запрос ресканирования: агент {agent_id} by {current_user.username}")
+    return {"status": "queued"}
+
+
+@app.get("/pending-rescan")
+async def get_pending_rescan(agent_id: str):
+    """Agent polls: should I rescan? No auth needed (same pattern as pending-scans)."""
+    if agent_id in _pending_rescans:
+        _pending_rescans.discard(agent_id)
+        return {"rescan": True}
+    return {"rescan": False}
+
+
+@app.post("/rescan-done")
+async def rescan_done_endpoint(data: dict, db: AsyncSession = Depends(get_db)):
+    """Agent reports that forced rescan completed."""
+    agent_id = data.get("agent_id", "unknown")
+    found    = int(data.get("found", 0))
+    logger.info(f"Ресканирование завершено: агент={agent_id}, найдено={found}")
+    await manager.broadcast({"type": "rescan_done", "agent_id": agent_id, "found": found})
+    return {"status": "ok"}
 
 
 @app.post("/scan-file-done")

@@ -115,6 +115,39 @@ echo [*] Creating config.ini ...
     echo min_confidence_image = 0.40
 ) > "C:\EDR\agent\config.ini"
 echo [OK] Server: %SERVER_URL%
+
+:: --- Write START_AGENT.bat (always fresh, no encoding issues) ---
+(
+    echo @echo off
+    echo title EDR Agent
+    echo set AGENT_DIR=%%~dp0
+    echo if "%%AGENT_DIR:~-1%%"=="\" set AGENT_DIR=%%AGENT_DIR:~0,-1%%
+    echo echo ========================================
+    echo echo  EDR Agent
+    echo echo  Folder: %%AGENT_DIR%%
+    echo echo ========================================
+    echo echo.
+    echo :loop
+    echo echo [%%time%%] -- Starting agent --
+    echo if exist "%%AGENT_DIR%%\data\agent.lock" del "%%AGENT_DIR%%\data\agent.lock" ^>nul 2^>^&1
+    echo cd /d "%%AGENT_DIR%%"
+    echo python -u agent.py
+    echo set EXIT_CODE=%%errorlevel%%
+    echo if %%EXIT_CODE%% equ 0 ^(
+    echo     echo [%%time%%] Agent stopped.
+    echo     pause
+    echo     exit /b 0
+    echo ^)
+    echo if %%EXIT_CODE%% equ 99 ^(
+    echo     echo [%%time%%] Update applied -- restarting...
+    echo     timeout /t 2 /nobreak ^>nul
+    echo     goto loop
+    echo ^)
+    echo echo [%%time%%] Error code %%EXIT_CODE%%. Restarting in 5s... ^(CTRL+C to quit^)
+    echo timeout /t 5 /nobreak ^>nul
+    echo goto loop
+) > "C:\EDR\agent\START_AGENT.bat"
+echo [OK] START_AGENT.bat created.
 echo.
 
 :: --- Install Python packages ---

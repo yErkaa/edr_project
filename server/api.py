@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -55,9 +56,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("edr.server")
 
-# ── FastAPI ───────────────────────────────────────────────────────────────────
+# ── FastAPI lifespan ──────────────────────────────────────────────────────────
 
-app = FastAPI(title="School EDR — Защита ПД учеников")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _startup()
+    yield
+
+
+app = FastAPI(title="School EDR — Защита ПД учеников", lifespan=lifespan)
 
 BASE_DIR  = _BASE_DIR
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -167,8 +174,7 @@ manager = ConnectionManager()
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup():
+async def _startup():
     logger.info("=== EDR Server запускается ===")
     try:
         async with engine.begin() as conn:

@@ -20,6 +20,8 @@ import time
 from datetime import datetime
 from typing import Callable
 
+import win32con
+import win32file
 from pii_scanner import HIGH_PII_TYPES as _HIGH_PII_TYPES
 
 
@@ -30,9 +32,6 @@ def _pii_sev(pii_types: list, confidence: float) -> str:
     if len(unique) >= 2:                   # 2+ мягких типа (телефон+ФИО, почта+ФИО...) → MEDIUM
         return "MEDIUM"
     return "LOW"                           # один мягкий тип или ничего → LOW
-
-import win32con
-import win32file
 
 logger = logging.getLogger("edr.quarantine")
 

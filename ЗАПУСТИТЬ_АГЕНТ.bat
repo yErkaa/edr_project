@@ -1,79 +1,61 @@
 @echo off
-chcp 65001 >nul 2>&1
+title EDR Agent - Laptop 2
 
-REM Запрашиваем права администратора если нет
+:: --- Admin rights ---
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    powershell -NoProfile -Command "$f='%~f0'; $d='%~dp0'; Start-Process -FilePath $f -WorkingDirectory $d -Verb RunAs"
     exit /b
 )
 
-title EDR Agent
-
 set BASE=C:\edr_agent
-
-echo ========================================
-echo   EDR Agent  -  Laptop 2
-echo   Папка: %BASE%
-echo ========================================
-echo.
-
-REM ── Настройки подключения ──────────────────────────────────
-REM Адрес сервера (ноутбук 1). Меняй если изменился IP.
 set EDR_SERVER=http://DESKTOP-CLJB78R:8088
-
-REM Имя этого агента в дашборде
 set AGENT_ID=LAPTOP2
 
-echo [OK] Сервер: %EDR_SERVER%
-echo [OK] Агент:  %AGENT_ID%
+echo ========================================
+echo  EDR Agent  -  Laptop 2
+echo  Server: %EDR_SERVER%
+echo ========================================
 echo.
 
-REM ── Python ─────────────────────────────────────────────────
+:: --- Python: venv or system ---
 set VENV_PY=%BASE%\edr_agent_for_laptop2\.venv\Scripts\python.exe
 if exist "%VENV_PY%" (
     set PYTHON=%VENV_PY%
     echo [OK] Python: venv
 ) else (
     set PYTHON=python
-    echo [OK] Python: системный
+    echo [OK] Python: system
 )
 
-REM ── Обновление кода из GitHub (один раз при старте) ────────
+:: --- Git pull (get latest code from GitHub) ---
 echo.
-echo [%time%] Обновление кода из GitHub...
+echo [%time%] Pulling latest code from GitHub...
 cd /d "%BASE%"
 git pull
 echo.
 
 :loop
-echo [%time%] -- Запуск агента --
+echo [%time%] -- Starting agent --
 
-REM Удаляем устаревший lock файл
-if exist "%BASE%\agent\data\agent.lock" (
-    del "%BASE%\agent\data\agent.lock" >nul 2>&1
-)
+if exist "%BASE%\agent\data\agent.lock" del "%BASE%\agent\data\agent.lock" >nul 2>&1
 
 cd /d "%BASE%\agent"
 "%PYTHON%" -u agent.py
 set EXIT_CODE=%errorlevel%
 
 if %EXIT_CODE% equ 0 (
-    echo.
-    echo [%time%] Агент остановлен.
+    echo [%time%] Agent stopped.
     pause
     exit /b 0
 )
 
 if %EXIT_CODE% equ 99 (
-    echo.
-    echo [%time%] Обновление применено -- перезапуск...
+    echo [%time%] Update applied -- restarting...
     timeout /t 2 /nobreak >nul
     goto loop
 )
 
-echo.
-echo [%time%] Агент завершился с ошибкой (код %EXIT_CODE%).
-echo         Перезапуск через 5 секунд... (CTRL+C чтобы выйти)
+echo [%time%] Error (code %EXIT_CODE%). Restarting in 5s...
 timeout /t 5 /nobreak >nul
 goto loop

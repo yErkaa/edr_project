@@ -237,7 +237,7 @@ async def _offline_watchdog():
     while True:
         await asyncio.sleep(60)
         try:
-            cutoff = datetime.utcnow() - timedelta(seconds=120)
+            cutoff = datetime.utcnow() - timedelta(seconds=90)
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
                     select(AgentModel).where(

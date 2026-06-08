@@ -363,18 +363,15 @@ class Agent:
     # ── Heartbeat — автопереподключение ───────────────────────────────────────
 
     def _heartbeat(self):
-        """Каждые 60 сек проверяет сервер и переподключается если нужно."""
+        """Каждые 30 сек отправляет heartbeat на сервер (обновляет last_seen)."""
         while self.running:
-            time.sleep(60)
+            time.sleep(30)
             try:
-                r = requests.get(f"{SERVER_BASE}/health", timeout=5)
-                if r.status_code == 200:
-                    if not self._registered:
-                        logger.info("Сервер снова доступен, переподключаемся...")
-                        self.register()
-                        self._flush_now.set()
-                else:
-                    self._registered = False
+                was_registered = self._registered
+                self.register()  # обновляет last_seen на сервере каждые 30 сек
+                if not was_registered and self._registered:
+                    logger.info("Сервер снова доступен, переподключились.")
+                    self._flush_now.set()
             except Exception:
                 if self._registered:
                     logger.warning("Сервер недоступен, жду восстановления...")

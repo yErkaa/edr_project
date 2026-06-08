@@ -15,6 +15,8 @@ except Exception:
 # HIGH-level PII ──────────────────────────────────────────────────────────────
 
 _IIN_RE = re.compile(r"(?<!\d)(\d{12})(?!\d)")
+# ИИН с пробелами/дефисами внутри: "040512 650312" или "040512-650312"
+_IIN_SPACED_RE = re.compile(r"(?<!\d)(\d{6}[\s\-]?\d{6})(?!\d)")
 
 # Bank card: 16 digits in groups of 4, optionally separated by space/dash
 _CARD_RE = re.compile(r"\b(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})\b")
@@ -308,10 +310,19 @@ class PIIScanner:
 
         # ── HIGH-level PII ────────────────────────────────────────────────────
 
+        # Ищем ИИН: 12 подряд идущих цифр ИЛИ 6+пробел/дефис+6 цифр
+        _iin_found = False
         for match in _IIN_RE.finditer(text):
             if _validate_iin(match.group(1)):
                 found_types.append("IIN")
+                _iin_found = True
                 break
+        if not _iin_found:
+            for match in _IIN_SPACED_RE.finditer(text):
+                compact = re.sub(r"[\s\-]", "", match.group(1))
+                if len(compact) == 12 and (_validate_iin(compact) or compact.isdigit()):
+                    found_types.append("IIN")
+                    break
 
         for match in _CARD_RE.finditer(text):
             digits = "".join(match.groups())

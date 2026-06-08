@@ -461,16 +461,26 @@ async def post_event(data: EventIn, db: AsyncSession = Depends(get_db)):
                 PDFile.file_path == data.details["file"],
             )
         )
-        if not existing.scalars().first():
+        pd_existing = existing.scalars().first()
+        new_types = data.details.get("pii_types", "")
+        new_conf  = float(data.details.get("confidence", 0))
+        if not pd_existing:
             pd = PDFile(
                 agent_id=data.agent_id,
                 file_path=data.details["file"],
                 file_name=data.details.get("file_name") or os.path.basename(data.details["file"]),
-                pii_types=data.details.get("pii_types", ""),
-                confidence=float(data.details.get("confidence", 0)),
+                pii_types=new_types,
+                confidence=new_conf,
                 is_blocked=bool(data.details.get("blocked", False)),
             )
             db.add(pd)
+        else:
+            # Обновляем запись если нашли новые типы ПД или выше уверенность
+            if new_conf > pd_existing.confidence or new_types != pd_existing.pii_types:
+                pd_existing.pii_types  = new_types
+                pd_existing.confidence = new_conf
+                pd_existing.detected_at = datetime.utcnow()
+                logger.info(f"PDFile обновлён: {os.path.basename(data.details['file'])} types={new_types} conf={new_conf}")
 
     alert_data = detection_engine.process_event(
         agent_id=data.agent_id,
@@ -1296,7 +1306,13 @@ async def scan_file_done(
                 confidence=data.confidence,
             )
             db.add(pd)
-            await db.commit()
+        else:
+            # Обновляем при повторном (ручном) скане — могли найти ИИН которого не было
+            pd.pii_types   = data.pii_types
+            pd.confidence  = data.confidence
+            pd.detected_at = datetime.utcnow()
+            logger.info(f"PDFile обновлён (ручной скан): {fname} types={data.pii_types}")
+        await db.commit()
         await manager.broadcast({"type": "pd_files_update"})
     await manager.broadcast({
         "type": "scan_file_done",

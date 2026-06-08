@@ -339,12 +339,16 @@ class PIIScanner:
         elif _FIO_RU_RE.search(text) or _FIO_KZ_SUFFIX_RE.search(text):
             found_types.append("FIO")
 
+        # ML-вероятность вычисляем всегда (0.0 если модель не загружена)
+        ml_prob = _ml_predict(text)
+
         if not found_types:
-            ml_prob = _ml_predict(text)
+            # Regex ничего не нашёл — ML единственный сигнал
             if ml_prob >= _ML_THRESHOLD:
                 return True, round(ml_prob, 2), ["ML_DETECTED"]
             return False, 0.0, []
 
+        # Regex нашёл типы ПД — вычисляем детерминированную уверенность
         weights = {
             "IIN":     0.50,
             "CARD":    0.50,
@@ -354,8 +358,12 @@ class PIIScanner:
             "FIO":     0.15,
             "DOB":     0.10,
         }
-        confidence = round(min(sum(weights.get(t, 0) for t in found_types), 1.0), 2)
-        return True, confidence, found_types
+        regex_conf = min(sum(weights.get(t, 0) for t in found_types), 1.0)
+
+        # Финальный confidence: взвешенное среднее regex (70%) + ML (30%).
+        # Если ML недоступна ml_prob=0.0 → используется только regex_conf.
+        combined = round(min(regex_conf * 0.7 + ml_prob * 0.3, 1.0), 2)
+        return True, combined, found_types
 
     def scan_file(self, path: str, timeout: float = 30.0) -> tuple:
         """Return (is_pii, confidence, pii_types). Supports text, Office, PDF and image formats."""

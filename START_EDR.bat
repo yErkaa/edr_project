@@ -80,7 +80,7 @@ start "" "http://127.0.0.1:8088"
 echo.
 echo ============================================
 echo  [OK] Server:     http://127.0.0.1:8088
-echo  [OK] Login:      admin / admin123
+echo  [OK] Login:      admin / (пароль из server\.env — ADMIN_PASSWORD)
 echo  [OK] Agent log:  agent\logs\agent.log
 echo  [OK] Server log: server\logs\server.log
 echo ============================================

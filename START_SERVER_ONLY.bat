@@ -8,7 +8,7 @@ set UVICORN=%BASE%\.venv\Scripts\uvicorn.exe
 echo ============================================
 echo  EDR Server - School Personal Data Protection
 echo  Dashboard: http://127.0.0.1:8088
-echo  Login: admin / admin123
+echo  Login: admin / (пароль из server\.env — ADMIN_PASSWORD)
 echo ============================================
 echo.
 

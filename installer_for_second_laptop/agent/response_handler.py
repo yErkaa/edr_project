@@ -2,6 +2,7 @@ import ctypes
 import os
 import socket
 import subprocess
+import threading
 import time
 
 import requests
@@ -12,13 +13,6 @@ CURRENT_USER = os.environ.get("USERNAME", "unknown")
 
 _MESSENGER_PROCESSES = {"WhatsApp.exe", "Telegram.exe", "OUTLOOK.EXE", "thunderbird.exe"}
 
-_MAIL_DOMAINS = [
-    "smtp.gmail.com", "imap.gmail.com",
-    "smtp.mail.ru",   "imap.mail.ru",
-    "smtp.yandex.ru", "imap.yandex.ru",
-    "smtp.yahoo.com",
-]
-
 # ── Проверка прав администратора ──────────────────────────────────────────────
 
 def is_admin() -> bool:
@@ -26,9 +20,6 @@ def is_admin() -> bool:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
         return False
-
-if not is_admin():
-    print("ВНИМАНИЕ: агент запущен без прав администратора. Блокировка почты недоступна.")
 
 # ── pywin32 (опционально) ─────────────────────────────────────────────────────
 try:
@@ -38,22 +29,7 @@ try:
 except ImportError:
     _WIN32_AVAILABLE = False
 
-# ── win10toast (опционально) ──────────────────────────────────────────────────
-try:
-    from win10toast import ToastNotifier
-    _toaster = ToastNotifier()
-    _TOAST_AVAILABLE = True
-except ImportError:
-    _toaster = None
-    _TOAST_AVAILABLE = False
-
-# ── Auth-токен (устанавливается агентом при старте) ───────────────────────────
-_auth_token: str | None = None
-
-
-def set_auth_token(token: str):
-    global _auth_token
-    _auth_token = token
+# Уведомления через ctypes MessageBoxW в отдельном потоке (неблокирующие).
 
 
 # ── Вспомогательные ──────────────────────────────────────────────────────────
@@ -151,75 +127,36 @@ def unblock_file(path: str) -> bool:
 # ── Уведомления ───────────────────────────────────────────────────────────────
 
 def show_notification(title: str, message: str):
-    """Показывает уведомление: win10toast → MessageBox как fallback."""
-    if _TOAST_AVAILABLE and _toaster:
+    """Показывает уведомление через ctypes MessageBoxW в отдельном потоке (неблокирующий)."""
+    def _show():
         try:
-            _toaster.show_toast(title, message, duration=8, threaded=True)
-            return
-        except Exception:
-            pass
-    try:
-        ctypes.windll.user32.MessageBoxW(
-            0, message, title,
-            0x00000030 | 0x00001000,  # MB_ICONWARNING | MB_SYSTEMMODAL
-        )
-    except Exception as e:
-        print(f"[WARN] Уведомление не показано: {e}")
+            ctypes.windll.user32.MessageBoxW(
+                0, message, title,
+                0x00000030 | 0x00001000,  # MB_ICONWARNING | MB_SYSTEMMODAL
+            )
+        except Exception as e:
+            print(f"[WARN] Уведомление не показано: {e}")
 
-
-# ── Проверка привилегий ───────────────────────────────────────────────────────
-
-def check_privilege() -> bool:
-    """Проверяет, имеет ли текущий пользователь привилегию на разблокировку."""
-    if not _auth_token:
-        return False
-    try:
-        resp = requests.get(
-            f"{SERVER_BASE}/privileges",
-            params={"username": CURRENT_USER},
-            headers={"Authorization": f"Bearer {_auth_token}"},
-            timeout=3,
-        )
-        if resp.status_code == 200:
-            for priv in resp.json():
-                agent_ok = priv.get("agent_id") in (None, "", AGENT_ID)
-                if agent_ok and (priv.get("can_unlock_files") or priv.get("can_view_pii")):
-                    return True
-    except Exception:
-        pass
-    return False
-
-
-def check_user_privilege(username: str, agent_id: str, token: str) -> bool:
-    """Проверяет привилегию для конкретного пользователя (используется из агента)."""
-    try:
-        resp = requests.get(
-            f"{SERVER_BASE}/privileges",
-            params={"username": username},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            for priv in resp.json():
-                if (priv.get("agent_id") in (None, "", agent_id)
-                        and priv.get("can_unlock_files")):
-                    return True
-    except Exception as e:
-        print(f"[ERROR] Проверка привилегий: {e}")
-    return False
+    threading.Thread(target=_show, daemon=True).start()
 
 
 # ── HIGH-событие ──────────────────────────────────────────────────────────────
 
 def handle_high_event(file_path: str, reason: str):
     """Блокирует файл и уведомляет пользователя при HIGH-событии."""
-    blocked = block_file(file_path)
     fname = os.path.basename(file_path)
+
+    # Файл мог быть уже перемещён в карантин — не пытаемся блокировать несуществующий путь
+    if os.path.exists(file_path):
+        blocked = block_file(file_path)
+    else:
+        blocked = False  # файл в карантине, блокировка не нужна
+
     msg = (
         f"Обнаружена попытка утечки персональных данных!\n\n"
         f"Файл: {fname}\n"
         f"Причина: {reason}\n\n"
-        f"Доступ {'заблокирован' if blocked else 'НЕ заблокирован (нет прав)'}.\n"
+        f"Доступ {'заблокирован' if blocked else 'файл изолирован (карантин)'}.\n"
         f"Обратитесь к системному администратору."
     )
     show_notification("EDR — Угроза ПД учеников", msg)
@@ -271,17 +208,7 @@ def monitor_clipboard():
 
             process_name = next(iter(running))
 
-            if check_privilege():
-                # Пользователь имеет привилегию — только логируем как MEDIUM
-                print(f"[INFO] Clipboard с ПД разрешён (привилегия): {process_name}")
-                _send_event("clipboard_pii", "MEDIUM", {
-                    "process": process_name,
-                    "pii_types": ",".join(pii_types),
-                    "note": "Разрешено — есть привилегия",
-                })
-                continue
-
-            # Нет привилегии — блокируем
+            # Блокируем передачу ПД через мессенджер
             pyperclip.copy("")
             prev_text = ""
             show_notification(
@@ -297,54 +224,6 @@ def monitor_clipboard():
         except Exception as e:
             print(f"[ERROR] monitor_clipboard: {e}")
             time.sleep(2)
-
-
-# ── 2. Блокировка почтовых серверов ──────────────────────────────────────────
-
-def block_mail_servers():
-    """Блокирует исходящие соединения к почтовым серверам через Windows Firewall."""
-    if not is_admin():
-        print("[ERROR] block_mail_servers: требуются права администратора")
-        return
-
-    print("[INFO] Блокировка почтовых серверов через Windows Firewall...")
-    for domain in _MAIL_DOMAINS:
-        rule_name = f"EDR_BLOCK_{domain}"
-        cmd = [
-            "netsh", "advfirewall", "firewall", "add", "rule",
-            f"name={rule_name}",
-            "dir=out",
-            "action=block",
-            f"remotehost={domain}",
-            "enable=yes",
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"  [OK] Заблокирован: {domain}")
-        else:
-            print(f"  [WARN] Не удалось заблокировать {domain}: {result.stderr.strip()}")
-
-
-# ── 3. Снятие блокировки почтовых серверов ───────────────────────────────────
-
-def unblock_mail_servers():
-    """Удаляет все правила EDR_BLOCK_* из Windows Firewall."""
-    if not is_admin():
-        print("[ERROR] unblock_mail_servers: требуются права администратора")
-        return
-
-    print("[INFO] Снятие блокировки почтовых серверов...")
-    for domain in _MAIL_DOMAINS:
-        rule_name = f"EDR_BLOCK_{domain}"
-        cmd = [
-            "netsh", "advfirewall", "firewall", "delete", "rule",
-            f"name={rule_name}",
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"  [OK] Удалено правило: {rule_name}")
-        else:
-            print(f"  [INFO] Правило не найдено: {rule_name}")
 
 
 # ── Завершение процесса ───────────────────────────────────────────────────────

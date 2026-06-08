@@ -10,7 +10,8 @@ os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 with open(SOURCE_FILE, "w", encoding="utf-8") as f:
-    f.write("IIN: 123456789012\nPhone: +77771234567\nEmail: student@example.com\n")
+    # ИИН 900101300017 — валидный, проходит контрольную сумму
+    f.write("ИИН: 900101300017\nТелефон: +77771234567\nEmail: student@example.com\nФИО: Алиев Ерлан Сериков\n")
 
 print(f"[INFO] Source file created: {SOURCE_FILE}")
 

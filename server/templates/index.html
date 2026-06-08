@@ -402,11 +402,11 @@
     <div id="loginError" class="d-none mb-3"></div>
     <div class="mb-3">
       <label class="form-label">Логин</label>
-      <input id="loginUser" type="text" class="form-control" value="admin"/>
+      <input id="loginUser" type="text" class="form-control" placeholder="Имя пользователя"/>
     </div>
     <div class="mb-3">
       <label class="form-label">Пароль</label>
-      <input id="loginPass" type="password" class="form-control" value="admin123"
+      <input id="loginPass" type="password" class="form-control" placeholder="Пароль"
              onkeydown="if(event.key==='Enter') doLogin()"/>
     </div>
     <button class="btn-login" onclick="doLogin()">
@@ -1476,7 +1476,6 @@ function _eventIcon(evType) {
     'suspicious_process':         'bi-bug-fill',
     'clipboard_block':            'bi-clipboard-x-fill',
     'clipboard_pii':              'bi-clipboard-fill',
-    'file_access_granted':        'bi-unlock-fill',
     'file_opened_no_pii':         'bi-file-check-fill',
     'unauthorized_access_attempt':'bi-shield-x-fill',
     'brute_force_attempt':        'bi-exclamation-octagon-fill',

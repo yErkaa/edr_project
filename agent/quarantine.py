@@ -36,7 +36,8 @@ import win32file
 
 logger = logging.getLogger("edr.quarantine")
 
-QUARANTINE_DIR  = r"C:\EDR_Quarantine"
+QUARANTINE_DIR   = r"C:\EDR_Quarantine"
+SCREENSHOTS_DIR  = r"C:\EDR_Quarantine\_screenshots"
 QUARANTINE_EXTS = {
     ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".txt", ".pdf",
     ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif",
@@ -91,6 +92,12 @@ def setup_quarantine_dir() -> bool:
             ["icacls", QUARANTINE_DIR, "/grant", "SYSTEM:(OI)(CI)F"],
             capture_output=True, timeout=10,
         )
+        # Защищённая директория для скриншотов (те же права, что у карантина)
+        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+        subprocess.run(["icacls", SCREENSHOTS_DIR, "/inheritance:r"],     capture_output=True, timeout=10)
+        subprocess.run(["icacls", SCREENSHOTS_DIR, "/grant", "*S-1-5-32-544:(OI)(CI)F"], capture_output=True, timeout=10)
+        subprocess.run(["icacls", SCREENSHOTS_DIR, "/grant", "SYSTEM:(OI)(CI)F"],         capture_output=True, timeout=10)
+
         logger.info(f"Quarantine dir ready: {QUARANTINE_DIR}")
         return True
     except Exception as e:

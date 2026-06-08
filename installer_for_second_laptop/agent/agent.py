@@ -27,7 +27,7 @@ from process_monitor import scan_processes
 from response_handler import handle_high_event, monitor_clipboard
 from usb_monitor import USBMonitor
 from quarantine import (
-    PROTECTED_EXTS, DirectoryWatcher,
+    PROTECTED_EXTS, SCREENSHOTS_DIR, DirectoryWatcher,
     quarantine_file, is_quarantine_stub, setup_quarantine_dir,
 )
 
@@ -66,10 +66,14 @@ _DATA_DIR      = os.path.join(_AGENT_DIR, "data")
 _LOCK_FILE     = os.path.join(_DATA_DIR, "agent.lock")
 _SCAN_CACHE_DB = os.path.join(_DATA_DIR, "scan_cache.db")
 
-# Изображения дают много ложных срабатываний через OCR — требуем более высокую уверенность
+# ── Флаги из config.ini [protection] ──────────────────────────────────────────
+
+MONITOR_CLIPBOARD = _cfg.getboolean("protection", "monitor_clipboard", fallback=True)
+
+# Пороги confidence читаем из config; дефолты — текущие значения
 _IMAGE_EXTS_AGENT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
-_MIN_CONF_DEFAULT = 0.15
-_MIN_CONF_IMAGE   = 0.40
+_MIN_CONF_DEFAULT = float(_cfg.get("protection", "min_confidence",       fallback="0.15"))
+_MIN_CONF_IMAGE   = float(_cfg.get("protection", "min_confidence_image",  fallback="0.40"))
 
 # ── Логирование ───────────────────────────────────────────────────────────────
 
@@ -507,9 +511,9 @@ class Agent:
 
             img = ImageGrab.grab()
 
-            scr_dir = os.path.join(_AGENT_DIR, "screenshots")
-            os.makedirs(scr_dir, exist_ok=True)
-            img.save(os.path.join(scr_dir, filename))
+            # Сохраняем в защищённую директорию карантина (admin-only ACL)
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+            img.save(os.path.join(SCREENSHOTS_DIR, filename))
 
             import base64, io
             buf = io.BytesIO()
@@ -812,10 +816,13 @@ class Agent:
             threading.Thread(target=self.monitor_usb, daemon=True),
             threading.Thread(target=self._flush_buffer, daemon=True),
             threading.Thread(target=self._heartbeat, daemon=True),
-            threading.Thread(target=self._monitor_clipboard, daemon=True),
             threading.Thread(target=self._poll_quarantine_commands, daemon=True),
             threading.Thread(target=self._poll_scan_requests, daemon=True),
         ]
+        if MONITOR_CLIPBOARD:
+            threads.append(threading.Thread(target=self._monitor_clipboard, daemon=True))
+        else:
+            logger.info("Clipboard-монитор отключён (monitor_clipboard=false в config.ini)")
         for t in threads:
             t.start()
 

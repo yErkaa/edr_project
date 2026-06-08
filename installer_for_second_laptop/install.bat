@@ -75,11 +75,13 @@ echo [*] Настраиваем config.ini с IP сервера...
     echo watch_paths =
     echo.
     echo [protection]
-    echo enabled           = true
-    echo password          = school2024
-    echo max_attempts      = 3
-    echo block_mail        = false
-    echo monitor_clipboard = true
+    echo enabled              = true
+    echo password             = school2024
+    echo max_attempts         = 3
+    echo block_mail           = false
+    echo monitor_clipboard    = true
+    echo min_confidence       = 0.15
+    echo min_confidence_image = 0.40
 ) > "C:\EDR\agent\config.ini"
 echo [OK] config.ini создан.
 
@@ -121,13 +123,13 @@ if %errorLevel% neq 0 (
 echo.
 echo ============================================================
 echo  [ГОТОВО] Агент установлен в C:\EDR\agent
-echo  Сервер: http://%SERVER_IP%:8088
+echo  Сервер:  http://%SERVER_IP%:8088
+echo  Ярлык:   Рабочий стол -^> "EDR Agent.bat"
 echo ============================================================
 echo.
-echo Запускаем агент...
+echo Запускаем агент через START_AGENT.bat...
 echo (Закройте это окно чтобы остановить агент)
 echo.
 
 cd /d C:\EDR\agent
-python -u agent.py
-pause
+call START_AGENT.bat

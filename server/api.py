@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import hashlib
 import io
 import json
 import logging
 import os
+import re
 import smtplib
 import sys
 from collections import defaultdict
@@ -41,10 +43,12 @@ TOKEN_EXPIRE_MINUTES = 60 * 8
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _LOG_DIR  = os.path.join(_BASE_DIR, "logs")
 _SCR_DIR  = os.path.join(_BASE_DIR, "screenshots")
+_QUARANTINE_STORE_DIR = os.path.join(_BASE_DIR, "quarantine_storage")
 _EMAIL_SETTINGS_FILE = os.path.join(_BASE_DIR, "email_settings.json")
 
 os.makedirs(_LOG_DIR, exist_ok=True)
 os.makedirs(_SCR_DIR, exist_ok=True)
+os.makedirs(_QUARANTINE_STORE_DIR, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -333,6 +337,9 @@ class QuarantineIn(BaseModel):
     filename: Optional[str] = None
     pii_types: Optional[str] = None
     confidence: float = 0.0
+
+class QuarantineUploadIn(BaseModel):
+    file_content_b64: str
 
 
 class ScreenshotIn(BaseModel):
@@ -641,6 +648,63 @@ async def register_quarantine(
     return {"status": "ok"}
 
 
+def _quarantine_server_path(file_id: int, filename: str) -> str:
+    safe = re.sub(r'[\\/:*?"<>|]', '_', filename)
+    return os.path.join(_QUARANTINE_STORE_DIR, f"{file_id}_{safe}")
+
+
+@app.post("/quarantine-upload/{file_id}", summary="Агент загружает карантинный файл на сервер")
+async def upload_quarantine_file(
+    file_id: int,
+    data: QuarantineUploadIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent uploads the quarantined file so it lives ONLY on the admin's server, not on the student laptop."""
+    result = await db.execute(select(QuarantineFile).where(QuarantineFile.id == file_id))
+    qf = result.scalar_one_or_none()
+    if not qf:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        content = base64.b64decode(data.file_content_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64")
+
+    server_path = _quarantine_server_path(file_id, qf.filename)
+    with open(server_path, "wb") as f:
+        f.write(content)
+
+    # Mark quarantine_path empty — file now lives on server only
+    qf.quarantine_path = ""
+    await db.commit()
+    logger.info(f"Quarantine stored on server: {qf.filename} ({len(content)} bytes, id={file_id})")
+    return {"status": "ok"}
+
+
+@app.get("/quarantine-download/{file_id}", summary="Агент скачивает карантинный файл с сервера")
+async def download_quarantine_file(
+    file_id: int,
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent downloads a quarantine file from server for restore."""
+    result = await db.execute(select(QuarantineFile).where(QuarantineFile.id == file_id))
+    qf = result.scalar_one_or_none()
+    if not qf:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    server_path = _quarantine_server_path(file_id, qf.filename)
+    if not os.path.isfile(server_path):
+        raise HTTPException(status_code=404, detail="File not on server")
+
+    with open(server_path, "rb") as f:
+        content = f.read()
+
+    return {
+        "filename": qf.filename,
+        "file_content_b64": base64.b64encode(content).decode(),
+    }
+
+
 @app.get("/quarantine", summary="Список файлов в карантине")
 async def list_quarantine(
     current_user: User = Depends(get_current_user),
@@ -733,6 +797,14 @@ async def restore_done(
     if data.get("success"):
         qf.is_restored = True
         logger.info(f"Файл восстановлен агентом: {qf.filename}")
+        # Удалить серверную копию если есть
+        srv = _quarantine_server_path(file_id, qf.filename)
+        if os.path.isfile(srv):
+            try:
+                os.remove(srv)
+                logger.info(f"Серверная копия удалена после восстановления: {srv}")
+            except Exception as e:
+                logger.warning(f"Cannot delete server quarantine after restore: {e}")
         # Сбросить флаг is_blocked в PDFile, чтобы файл снова появился как активный
         pd_result = await db.execute(
             select(PDFile).where(PDFile.file_path == qf.original_path)
@@ -758,13 +830,22 @@ async def delete_quarantine(
     if not qf:
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-    # Delete from disk if still exists
-    if os.path.isfile(qf.quarantine_path):
+    # Delete local quarantine copy if still exists on agent
+    if qf.quarantine_path and os.path.isfile(qf.quarantine_path):
         try:
             os.remove(qf.quarantine_path)
-            logger.info(f"Permanently deleted: {qf.quarantine_path}")
+            logger.info(f"Permanently deleted local: {qf.quarantine_path}")
         except Exception as e:
             logger.warning(f"Cannot delete {qf.quarantine_path}: {e}")
+
+    # Delete server-side copy if uploaded
+    srv = _quarantine_server_path(file_id, qf.filename)
+    if os.path.isfile(srv):
+        try:
+            os.remove(srv)
+            logger.info(f"Permanently deleted server copy: {srv}")
+        except Exception as e:
+            logger.warning(f"Cannot delete server quarantine: {e}")
 
     # Remove stub too
     if os.path.isfile(qf.original_path):
@@ -1197,6 +1278,7 @@ async def quarantine_done(
         if qf_existing:
             if data.quarantine_path:
                 qf_existing.quarantine_path = data.quarantine_path
+            result_qf_id = qf_existing.id
         else:
             qf = QuarantineFile(
                 agent_id=pd_file.agent_id,
@@ -1207,7 +1289,11 @@ async def quarantine_done(
                 confidence=pd_file.confidence,
             )
             db.add(qf)
+            await db.flush()  # populate qf.id
+            result_qf_id = qf.id
         logger.info(f"Файл в карантине: {pd_file.file_name} path={data.quarantine_path!r}")
+    else:
+        result_qf_id = None
 
     await db.commit()
     if data.success:
@@ -1215,7 +1301,7 @@ async def quarantine_done(
             select(func.count()).select_from(QuarantineFile).where(QuarantineFile.is_restored == False)  # noqa: E712
         )
         await manager.broadcast({"type": "quarantine_update", "count": cnt.scalar() or 0})
-    return {"status": "ok"}
+    return {"status": "ok", "quarantine_file_id": result_qf_id}
 
 
 # ── Manual file scan ─────────────────────────────────────────────────────────

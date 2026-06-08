@@ -700,6 +700,62 @@ class Agent:
             self._run_pending_restores()
             time.sleep(5)
 
+    def _upload_quarantine_to_server(self, quarantine_path: str, file_id: int) -> bool:
+        """Upload quarantined file to server then delete local copy.
+        After this the file lives ONLY on the admin's server — student admins can't access it.
+        """
+        import base64 as _b64
+        try:
+            size = os.path.getsize(quarantine_path)
+            if size > 50 * 1024 * 1024:
+                logger.warning(f"Quarantine file too large for server upload ({size} bytes): {quarantine_path}")
+                return False
+            with open(quarantine_path, "rb") as f:
+                content = f.read()
+            r = requests.post(
+                f"{SERVER_BASE}/quarantine-upload/{file_id}",
+                json={"file_content_b64": _b64.b64encode(content).decode()},
+                timeout=120,
+            )
+            if r.status_code == 200:
+                try:
+                    os.remove(quarantine_path)
+                    logger.info(f"Карантинный файл загружен на сервер и удалён локально: {quarantine_path}")
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить локальную копию карантина: {e}")
+                return True
+            logger.warning(f"Загрузка карантина на сервер: HTTP {r.status_code}")
+            return False
+        except Exception as e:
+            logger.warning(f"_upload_quarantine_to_server: {e}")
+            return False
+
+    def _download_quarantine_from_server(self, file_id: int, original_path: str) -> str:
+        """Download quarantine file from server for restore. Returns temp file path or ''."""
+        import base64 as _b64
+        import tempfile
+        try:
+            r = requests.get(
+                f"{SERVER_BASE}/quarantine-download/{file_id}",
+                params={"agent_id": AGENT_ID},
+                timeout=120,
+            )
+            if r.status_code != 200:
+                logger.warning(f"Скачивание карантина {file_id}: HTTP {r.status_code}")
+                return ""
+            data = r.json()
+            content = _b64.b64decode(data["file_content_b64"])
+            ext = (os.path.splitext(original_path)[1]
+                   or os.path.splitext(data.get("filename", ""))[1])
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            tmp.write(content)
+            tmp.close()
+            logger.info(f"Карантинный файл скачан с сервера: {data.get('filename')} ({len(content)} bytes)")
+            return tmp.name
+        except Exception as e:
+            logger.warning(f"_download_quarantine_from_server: {e}")
+            return ""
+
     def _run_pending_quarantines(self):
         try:
             r = requests.get(
@@ -712,15 +768,23 @@ class Agent:
                 fid, path = item["id"], item["file_path"]
                 ok, qpath = quarantine_file(path)
                 if not ok and not os.path.isfile(path):
-                    # File doesn't exist at all — mark as done to stop retrying
                     ok = True
                     logger.warning(f"Файл для карантина не найден (уже перемещён?): {path}")
                 try:
-                    requests.post(
+                    done_r = requests.post(
                         f"{SERVER_BASE}/pd-files/{fid}/quarantine-done",
                         json={"quarantine_path": qpath, "success": ok},
                         timeout=5,
                     )
+                    if ok and qpath and done_r.status_code == 200:
+                        qf_id = done_r.json().get("quarantine_file_id")
+                        if qf_id:
+                            # Upload to server in background, then delete local copy
+                            threading.Thread(
+                                target=self._upload_quarantine_to_server,
+                                args=(qpath, qf_id),
+                                daemon=True,
+                            ).start()
                 except Exception:
                     pass
         except Exception as e:
@@ -735,19 +799,42 @@ class Agent:
             if r.status_code != 200:
                 return
             for item in r.json():
-                fid = item["id"]
+                fid   = item["id"]
                 qpath = item["quarantine_path"]
                 opath = item["original_path"]
+
+                tmp_file = None
+                if not qpath:
+                    # File stored on server — download to temp location first
+                    tmp_file = self._download_quarantine_from_server(fid, opath)
+                    if not tmp_file:
+                        logger.warning(f"Не удалось получить карантинный файл {fid} с сервера")
+                        try:
+                            requests.post(
+                                f"{SERVER_BASE}/quarantine/{fid}/restore-done",
+                                json={"success": False}, timeout=5,
+                            )
+                        except Exception:
+                            pass
+                        continue
+                    qpath = tmp_file
+
                 from quarantine import restore_file
-                # Подавляем события вотчера для этого пути на 20 сек,
-                # чтобы восстановленный файл не породил HIGH-алерт
                 if self.dir_watcher:
                     self.dir_watcher.suppress_restore_path(opath)
                 ok = restore_file(qpath, opath)
+
+                # Clean up temp download
+                if tmp_file and os.path.isfile(tmp_file):
+                    try:
+                        os.remove(tmp_file)
+                    except Exception:
+                        pass
+
                 if ok:
                     logger.info(f"Файл восстановлен: {opath}")
                 else:
-                    logger.warning(f"Не удалось восстановить: {qpath}")
+                    logger.warning(f"Не удалось восстановить файл (qpath={qpath!r})")
                 try:
                     requests.post(
                         f"{SERVER_BASE}/quarantine/{fid}/restore-done",

@@ -74,30 +74,43 @@ _STUB_TEXT = (
 # ── Quarantine directory setup ────────────────────────────────────────────────
 
 def setup_quarantine_dir() -> bool:
-    """Create C:\\EDR_Quarantine with admin-only permissions."""
-    try:
-        os.makedirs(QUARANTINE_DIR, exist_ok=True)
-        # Remove inherited ACEs
-        subprocess.run(
-            ["icacls", QUARANTINE_DIR, "/inheritance:r"],
-            capture_output=True, timeout=10,
-        )
-        # S-1-5-32-544 = Administrators (locale-agnostic)
-        subprocess.run(
-            ["icacls", QUARANTINE_DIR, "/grant", "*S-1-5-32-544:(OI)(CI)F"],
-            capture_output=True, timeout=10,
-        )
-        subprocess.run(
-            ["icacls", QUARANTINE_DIR, "/grant", "SYSTEM:(OI)(CI)F"],
-            capture_output=True, timeout=10,
-        )
-        # Защищённая директория для скриншотов (те же права, что у карантина)
-        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
-        subprocess.run(["icacls", SCREENSHOTS_DIR, "/inheritance:r"],     capture_output=True, timeout=10)
-        subprocess.run(["icacls", SCREENSHOTS_DIR, "/grant", "*S-1-5-32-544:(OI)(CI)F"], capture_output=True, timeout=10)
-        subprocess.run(["icacls", SCREENSHOTS_DIR, "/grant", "SYSTEM:(OI)(CI)F"],         capture_output=True, timeout=10)
+    """Создаёт C:\\EDR_Quarantine с правами ТОЛЬКО для Administrators + SYSTEM.
 
-        logger.info(f"Quarantine dir ready: {QUARANTINE_DIR}")
+    Что происходит когда обычный пользователь пытается открыть папку:
+      Windows показывает «У вас нет разрешения на доступ к этой папке»
+      и предлагает ввести пароль администратора.
+    Агент (запущен от администратора) пишет файлы в папку без проблем.
+    """
+    try:
+        for d in (QUARANTINE_DIR, SCREENSHOTS_DIR):
+            os.makedirs(d, exist_ok=True)
+
+            # 1. Убираем наследование И удаляем все унаследованные ACE (чистый старт)
+            subprocess.run(
+                ["icacls", d, "/inheritance:r", "/T", "/Q"],
+                capture_output=True, timeout=15,
+            )
+            # 2. Сбрасываем все явные ACE что могли накопиться от предыдущих запусков
+            subprocess.run(
+                ["icacls", d, "/reset", "/T", "/Q"],
+                capture_output=True, timeout=15,
+            )
+            # 3. Снова убираем наследование после reset (reset его восстанавливает)
+            subprocess.run(
+                ["icacls", d, "/inheritance:r", "/T", "/Q"],
+                capture_output=True, timeout=15,
+            )
+            # 4. Выдаём полные права ТОЛЬКО Administrators (S-1-5-32-544) и SYSTEM
+            subprocess.run(
+                ["icacls", d, "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q"],
+                capture_output=True, timeout=15,
+            )
+            subprocess.run(
+                ["icacls", d, "/grant:r", "SYSTEM:(OI)(CI)F", "/T", "/Q"],
+                capture_output=True, timeout=15,
+            )
+
+        logger.info(f"Quarantine dir protected (admin-only, password required): {QUARANTINE_DIR}")
         return True
     except Exception as e:
         logger.error(f"setup_quarantine_dir: {e}")
@@ -126,6 +139,13 @@ def quarantine_file(filepath: str) -> tuple[bool, str]:
         dst = os.path.join(QUARANTINE_DIR, f"{ts}_{os.path.basename(filepath)}")
 
         shutil.move(filepath, dst)
+
+        # Сбрасываем права на перемещённый файл — он может нести старые ACE с собой.
+        # /reset включает наследование от папки (Administrators+SYSTEM only).
+        subprocess.run(
+            ["icacls", dst, "/reset", "/Q"],
+            capture_output=True, timeout=10,
+        )
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(_STUB_TEXT)

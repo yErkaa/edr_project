@@ -1,33 +1,31 @@
 @echo off
-chcp 65001 >nul
-title EDR Agent - Установка
+title EDR Agent - Install
 
-echo ================================================
-echo  EDR Agent - Автоматическая установка
-echo  Сервер: DESKTOP-CLJB78R
-echo ================================================
+echo ==================================================
+echo  EDR Agent - Auto Install
+echo  Server: DESKTOP-CLJB78R
+echo ==================================================
 echo.
 
-REM ── Адрес сервера ────────────────────────────────────────
 set SERVER=DESKTOP-CLJB78R
 set SERVER_URL=http://%SERVER%:8088
 
-REM ── Автоматический запрос прав администратора ────────────
+:: --- Admin rights check ---
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    echo [*] Запрашиваем права администратора...
+    echo [*] Requesting admin rights...
     powershell -NoProfile -Command "$f='%~f0'; $d='%~dp0'; Start-Process -FilePath $f -WorkingDirectory $d -Verb RunAs"
     exit /b
 )
-echo [OK] Права администратора.
+echo [OK] Admin rights confirmed.
 echo.
 
-REM ── Проверка Python ───────────────────────────────────────
+:: --- Python check / auto-install ---
 python --version >nul 2>&1
 if %errorLevel% equ 0 goto python_ok
 
-echo [*] Python не найден. Скачиваем Python 3.12...
-echo     Нужен интернет. Займёт 2-4 минуты.
+echo [*] Python not found. Downloading Python 3.12...
+echo     Requires internet. Takes 2-4 minutes.
 echo.
 
 set PYTMP=%TEMP%\python_edr_setup.exe
@@ -37,64 +35,64 @@ powershell -NoProfile -Command "Invoke-WebRequest -Uri '%PYURL%' -OutFile '%PYTM
 
 if not exist "%PYTMP%" (
     echo.
-    echo [ОШИБКА] Не удалось скачать Python.
+    echo [ERROR] Failed to download Python.
     echo.
-    echo Варианты:
-    echo   1. Проверь интернет-соединение и запусти install.bat снова
-    echo   2. Или установи Python вручную: python.org/downloads
-    echo      При установке поставь галочку "Add Python to PATH"
-    echo      Потом запусти install.bat снова
+    echo Options:
+    echo   1. Check internet and run install.bat again
+    echo   2. Or install manually: python.org/downloads
+    echo      Check "Add Python to PATH" during install
+    echo      Then run install.bat again
     echo.
     pause
     exit /b 1
 )
 
-echo [*] Устанавливаем Python 3.12 (тихая установка)...
+echo [*] Installing Python 3.12...
 "%PYTMP%" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
 del "%PYTMP%" >nul 2>&1
 
-echo [*] Обновляем PATH...
+:: Refresh PATH
 for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "SYS_PATH=%%b"
 set "PATH=%SYS_PATH%;%PATH%"
 
 python --version >nul 2>&1
 if %errorLevel% neq 0 (
     echo.
-    echo [!] Python установлен, но нужна перезагрузка.
-    echo     Перезагрузи компьютер и запусти install.bat снова.
-    echo     (Python скачивать повторно НЕ нужно)
+    echo [!] Python installed but needs reboot.
+    echo     Restart PC and run install.bat again.
+    echo     (Python will NOT be downloaded again)
     echo.
     pause
     exit /b 0
 )
-echo [OK] Python установлен успешно!
+echo [OK] Python installed!
 
 :python_ok
-echo [OK] Python найден:
+echo [OK] Python:
 python --version
 echo.
 
-REM ── Создание папки агента ────────────────────────────────
-echo [*] Создаём C:\EDR\agent ...
+:: --- Create agent folder ---
+echo [*] Creating C:\EDR\agent ...
 mkdir C:\EDR 2>nul
 mkdir C:\EDR\agent 2>nul
 mkdir C:\EDR\agent\data 2>nul
 mkdir C:\EDR\agent\logs 2>nul
-echo [OK] Папка создана.
+echo [OK] Folder ready.
 
-REM ── Копирование файлов ───────────────────────────────────
-echo [*] Копируем файлы агента...
+:: --- Copy files ---
+echo [*] Copying agent files...
 xcopy /E /I /Y /Q "%~dp0agent" "C:\EDR\agent"
 if %errorLevel% neq 0 (
-    echo [ОШИБКА] Не удалось скопировать файлы!
+    echo [ERROR] Failed to copy files!
     pause
     exit /b 1
 )
-echo [OK] Файлы скопированы.
+echo [OK] Files copied.
 echo.
 
-REM ── Создание config.ini ──────────────────────────────────
-echo [*] Создаём config.ini ...
+:: --- Create config.ini ---
+echo [*] Creating config.ini ...
 (
     echo [server]
     echo host     = %SERVER%
@@ -116,49 +114,49 @@ echo [*] Создаём config.ini ...
     echo min_confidence       = 0.15
     echo min_confidence_image = 0.40
 ) > "C:\EDR\agent\config.ini"
-echo [OK] Сервер: %SERVER_URL%
+echo [OK] Server: %SERVER_URL%
 echo.
 
-REM ── Установка зависимостей ───────────────────────────────
-echo [*] Устанавливаем зависимости (3-10 минут)...
+:: --- Install Python packages ---
+echo [*] Installing Python packages (3-10 minutes)...
 cd /d C:\EDR\agent
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt
 if %errorLevel% neq 0 (
     echo.
-    echo [!] Некоторые пакеты не установились.
-    echo     Агент запустится, часть функций может не работать.
+    echo [!] Some packages failed. Agent will still run.
     echo.
 ) else (
-    echo [OK] Все зависимости установлены.
+    echo [OK] All packages installed.
     echo.
 )
 
-REM ── Ярлык на Рабочем столе ───────────────────────────────
-echo [*] Создаём ярлык на Рабочем столе...
+:: --- Desktop shortcut ---
+echo [*] Creating desktop shortcut...
 (
     echo @echo off
     echo cd /d C:\EDR\agent
     echo call START_AGENT.bat
 ) > "%USERPROFILE%\Desktop\EDR Agent.bat"
-echo [OK] Ярлык: Рабочий стол\EDR Agent.bat
+echo [OK] Shortcut: Desktop\EDR Agent.bat
 echo.
 
-REM ── Связь с сервером ─────────────────────────────────────
-echo [*] Проверяем связь с сервером %SERVER_URL% ...
-python -c "import urllib.request; urllib.request.urlopen('%SERVER_URL%/health', timeout=5); print('[OK] Сервер доступен!')" 2>nul
+:: --- Test server connection ---
+echo [*] Testing server connection...
+python -c "import urllib.request; urllib.request.urlopen('%SERVER_URL%/health', timeout=5); print('[OK] Server reachable!')" 2>nul
 if %errorLevel% neq 0 (
-    echo [!] Сервер недоступен сейчас - это нормально.
-    echo     Агент подключится автоматически когда сервер запустится.
+    echo [!] Server not reachable right now - that is OK.
+    echo     Agent will connect automatically when server starts.
 )
 echo.
 
-echo ================================================
-echo  УСТАНОВКА ЗАВЕРШЕНА!
+echo ==================================================
+echo  DONE! Agent installed at C:\EDR\agent
+echo  Shortcut: Desktop\EDR Agent.bat
+echo ==================================================
 echo.
-echo  Агент запускается...
-echo  Закрой это окно чтобы остановить агент.
-echo ================================================
+echo  Starting agent now...
+echo  Close this window to stop the agent.
 echo.
 
 cd /d C:\EDR\agent
